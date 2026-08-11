@@ -1,0 +1,19 @@
+# config.yaml
+active_provider: "ollama"
+
+providers:
+  ollama:
+    base_url: "http://localhost:11434/v1"
+    model: "qwen2.5vl"
+    needs_api_key: false
+    vision_models:
+      - "qwen2.5vl"
+      - "llava"
+
+  openrouter:
+    base_url: "https://openrouter.ai/api/v1"
+    model: "google/gemini-flash-1.5"
+    needs_api_key: true
+    vision_models:
+      - "google/gemini-flash-1.5"
+      - "anthropic/claude-3.5-sonnet"
