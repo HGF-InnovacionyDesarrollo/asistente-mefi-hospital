@@ -102,19 +102,34 @@ def cargar_registro_ctu_uhb(record_id: int, data_dir: str = "data/ctu_uhb") -> d
     }
 
 
+FCF_MIN_FISIOLOGICO = 50.0  # lpm — por debajo de esto es dropout del sensor Doppler, no señal real
+FCF_MAX_FISIOLOGICO = 220.0
+
+
 def convertir_a_dataframe(fcf_data: np.ndarray, ua_data: np.ndarray, fs: int) -> pd.DataFrame:
     """Convierte arrays de CTU-UHB a un DataFrame en el formato de digitizer.py
     (tiempo en segundos, FCF/UA en los valores físicos).
 
     Asume que CTU-UHB ya está en unidades físicas (lpm para FCF, %).
+
+    CTU-UHB marca la pérdida de contacto del sensor Doppler con FCF=0 (no NaN) —
+    en el registro 1001, ~22% de las muestras son ceros de dropout. Sin filtrarlos,
+    inflan artificialmente la variabilidad calculada en clinical.py (un 0 dentro de
+    una ventana de 1 minuto arruina el máximo-mínimo) y arrastran la clasificación
+    FIGO hacia "sospechoso"/"patológico" incluso en registros con outcome normal
+    (confirmado: especificidad 0% en el batch de los 552 registros antes de este fix).
+    Se descartan como no confiables los valores fuera de rango fisiológico plausible,
+    igual que digitizer.py hace con sus propios tramos de lectura dudosa.
     """
     n = len(fcf_data)
     tiempo = np.arange(n) / fs  # segundos
 
+    fcf_valido = ~np.isnan(fcf_data) & (fcf_data >= FCF_MIN_FISIOLOGICO) & (fcf_data <= FCF_MAX_FISIOLOGICO)
+
     df = pd.DataFrame({
         "tiempo": tiempo,
         "fcf": fcf_data,
-        "fcf_confiable": ~np.isnan(fcf_data),
+        "fcf_confiable": fcf_valido,
         "ua": ua_data,
         "ua_confiable": ~np.isnan(ua_data),
     })
@@ -166,9 +181,9 @@ def imprimir_features(features: dict, indent: int = 0) -> None:
 
     figo = features["figo"]
     print(f"{prefix}Categoría FIGO: {figo['categoria']} {figo.get('semaforo_nice', '')}")
-    if figo.get("motivos"):
-        for motivo in figo["motivos"]:
-            print(f"{prefix}  - {motivo}")
+    if figo.get("razones"):
+        for razon in figo["razones"]:
+            print(f"{prefix}  - {razon}")
 
 
 def validar_registro(record_id: int, data_dir: str = "data/ctu_uhb", verbose: bool = False) -> dict:
@@ -218,8 +233,8 @@ def validar_registro(record_id: int, data_dir: str = "data/ctu_uhb", verbose: bo
 
     print(f"  Clasificación: FIGO {figo_cat} | NICE {nice_semaforo}")
     print(f"  Bases de la clasificación:")
-    for motivo in features["figo"].get("motivos", []):
-        print(f"    - {motivo}")
+    for razon in features["figo"].get("razones", []):
+        print(f"    - {razon}")
 
     return {
         "success": True,

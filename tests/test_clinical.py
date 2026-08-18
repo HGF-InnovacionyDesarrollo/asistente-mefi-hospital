@@ -224,11 +224,38 @@ def test_figo_categoria_iii_por_sinusoidal():
     assert features["patron_sinusoidal"]["presente"] is True
 
 
-def test_figo_categoria_ii_desacel_tardia_aislada_sin_variabilidad_reducida():
+def test_figo_categoria_i_desacel_tardia_aislada_no_repetitiva():
+    """Una desaceleración tardía aislada, sin repetirse, no descalifica de Categoría I:
+    FIGO 2015 define el criterio como "sin desaceleraciones repetitivas" (asociadas a
+    más del 50% de las contracciones), no "cero desaceleraciones". Tratar cualquier
+    ocurrencia aislada como descalificante resultó ser mucho más estricto que la guía
+    real — validado contra CTU-UHB (552 registros intraparto reales): con el criterio
+    viejo, 482/552 caían en Categoría II solo por esto, incluso registros con pH de
+    cordón normal (especificidad 3.1%). Ver `_hay_desaceleraciones_repetitivas`."""
     df = _trazado_con_desaceleracion("tardia", duracion_s=400, basal=140.0)
     df = df.copy()
     ruido = np.random.default_rng(2).normal(0, 4.0, size=len(df))  # variabilidad normal
     plano = df["fcf"] == 140.0
     df.loc[plano, "fcf"] = 140.0 + ruido[plano]
     features = clinical.extraer_features(df)
+    assert features["figo"]["categoria"] == "I"
+
+
+def test_figo_categoria_ii_desaceleraciones_tardias_repetitivas():
+    """3 desaceleraciones tardías dentro de una ventana de 20 minutos sí deben sacar
+    el registro de Categoría I (son "repetitivas" en el sentido de FIGO 2015): se
+    encadenan 3 tramos idénticos al de `_trazado_con_desaceleracion("tardia", ...)`,
+    que ya se sabe que producen 1 desaceleración tardía detectada cada uno."""
+    rng = np.random.default_rng(3)
+    segmentos = []
+    for i in range(3):
+        seg = _trazado_con_desaceleracion("tardia", duracion_s=400, basal=140.0).copy()
+        ruido = rng.normal(0, 4.0, size=len(seg))  # variabilidad normal de fondo
+        plano = seg["fcf"] == 140.0
+        seg.loc[plano, "fcf"] = 140.0 + ruido[plano]
+        seg["tiempo"] = seg["tiempo"] + i * 400.0
+        segmentos.append(seg)
+    df = pd.concat(segmentos, ignore_index=True)
+    features = clinical.extraer_features(df)
+    assert len(features["desaceleraciones"]) == 3
     assert features["figo"]["categoria"] == "II"

@@ -16,13 +16,30 @@ from streamlit_image_coordinates import streamlit_image_coordinates
 
 import clinical
 import prompts
-from digitizer import calibrar_desde_dos_puntos, digitalizar_con_calibracion, preparar_imagen
+from digitizer import (
+    calibrar_desde_dos_puntos,
+    detectar_anotaciones_clinicas,
+    digitalizar_con_calibracion,
+    extraer_metadatos_cabecera,
+    preparar_imagen,
+)
 
 load_dotenv()
 
 st.set_page_config(page_title="Asesor Clínico MEFI", layout="centered")
 
 st.title("Asesor Clínico MEFI - Hospital Gustavo Fricke")
+
+st.warning(
+    "**Este sistema es una ayuda diagnóstica, no un diagnóstico.** La clasificación FIGO/NICE "
+    "y el informe generado no reemplazan el juicio clínico ni la evaluación directa del "
+    "paciente. Precisión de clasificación no implica beneficio clínico demostrado: el ensayo "
+    "INFANT (Lancet, 2017) mostró que un sistema de apoyo a la decisión en CTG con alta "
+    "precisión de clasificación no mejoró los desenlaces neonatales. Este MVP usa una "
+    "simplificación de FIGO 2015 / NICE NG229 y no está validado en la población del "
+    "Hospital Gustavo Fricke.",
+    icon="⚠️",
+)
 
 # --- BARRA LATERAL: SELECTOR DINÁMICO DE ENTORNO ---
 st.sidebar.header("⚙️ Configuración de Inferencia")
@@ -274,6 +291,8 @@ if archivo_subido is not None:
                 with st.spinner("Orientando imagen y detectando paneles FCF/UA..."):
                     imagen_bytes, dpi_usado = _imagen_bytes_desde_archivo(archivo_subido, extension)
                     st.session_state.prep = preparar_imagen(imagen_bytes, dpi_render=dpi_usado)
+                    st.session_state.metadatos_cabecera = extraer_metadatos_cabecera(imagen_bytes)
+                    st.session_state.anotaciones_clinicas = detectar_anotaciones_clinicas(st.session_state.prep)
                 st.session_state.archivo_actual = archivo_subido.name
             except Exception as e:
                 st.error(f"Error al preparar la imagen: {e}")
@@ -285,6 +304,27 @@ if archivo_subido is not None:
         prep = st.session_state.prep
         for adv in prep.advertencias:
             st.warning(adv)
+
+        for adv in st.session_state.get("anotaciones_clinicas", []):
+            st.info(adv)
+
+        meta = st.session_state.get("metadatos_cabecera")
+        if meta is not None:
+            with st.expander("Metadatos de cabecera (leídos por OCR — revisar y corregir)"):
+                st.caption(
+                    "Lectura automática de mejor esfuerzo sobre la cabecera del papel — "
+                    "no es confiable al 100%, se procesa localmente y no se envía a ningún "
+                    "proveedor LLM. Corregí los campos antes de usarlos."
+                )
+                c1, c2 = st.columns(2)
+                c1.text_input("ID de registro", value=meta.get("id") or "", key="meta_id")
+                c1.number_input("FHR impreso (bpm)", value=meta.get("fhr_bpm") or 0, key="meta_fhr")
+                c2.text_input("Fecha/hora de inicio", value=meta.get("fecha_hora") or "", key="meta_fecha")
+                c2.number_input(
+                    "Velocidad de papel (cm/min)",
+                    value=meta.get("velocidad_papel_cm_min") or 1.0,
+                    key="meta_velocidad",
+                )
 
         st.subheader("1. Calibración manual del trazado")
         st.caption(

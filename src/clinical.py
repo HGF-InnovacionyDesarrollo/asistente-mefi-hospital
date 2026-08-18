@@ -317,6 +317,24 @@ def detectar_patron_sinusoidal(df: pd.DataFrame) -> dict:
 # --------------------------------------------------------------------------
 
 
+def _hay_desaceleraciones_repetitivas(decels: list[dict], ventana_s: float = 1200.0, minimo: int = 3) -> bool:
+    """Proxy de "desaceleraciones repetitivas" (FIGO 2015 define Categoría I como
+    "sin desaceleraciones repetitivas", asociadas a más del 50% de las contracciones):
+    3 o más desaceleraciones tardías/variables dentro de cualquier ventana de 20
+    minutos. Una o dos aisladas no deberían sacar el registro de Categoría I —
+    tratarlas como descalificantes por sí solas es más estricto que la guía real y
+    en intraparto (donde la compresión de cordón durante contracciones es casi
+    universal) arrastra prácticamente todo a "sospechoso" (confirmado: 482 de 552
+    registros de CTU-UHB caían en Categoría II solo por esto antes de este fix)."""
+    if len(decels) < minimo:
+        return False
+    inicios = sorted(d["inicio_s"] for d in decels)
+    for i in range(len(inicios) - minimo + 1):
+        if inicios[i + minimo - 1] - inicios[i] <= ventana_s:
+            return True
+    return False
+
+
 def clasificar_figo(features: dict) -> dict:
     """Combina línea base, variabilidad, aceleraciones, desaceleraciones y patrón
     sinusoidal en una categoría FIGO 2015 (I/II/III) + semáforo NICE NG229 por
@@ -360,18 +378,25 @@ def clasificar_figo(features: dict) -> dict:
         return {"categoria": "III", "descripcion": "Patológico", "razones": razones, "semaforo_nice": semaforo}
 
     # --- Categoría I (normal): todos los criterios deben cumplirse ---
+    repetitivas = _hay_desaceleraciones_repetitivas(tardias_o_variables)
     es_normal = (
         BASAL_MIN_NORMAL <= basal <= BASAL_MAX_NORMAL
         and variabilidad == "normal"
-        and len(tardias_o_variables) == 0
+        and not repetitivas
     )
     if es_normal:
-        return {"categoria": "I", "descripcion": "Normal", "razones": ["Sin hallazgos anormales."], "semaforo_nice": semaforo}
+        razones_normal = ["Sin hallazgos anormales."]
+        if tardias_o_variables:
+            razones_normal = [
+                f"{len(tardias_o_variables)} desaceleración(es) tardía(s)/variable(s) aislada(s), no repetitivas."
+            ]
+        return {"categoria": "I", "descripcion": "Normal", "razones": razones_normal, "semaforo_nice": semaforo}
 
     # --- Categoría II (sospechoso): todo lo que no cae en I ni III ---
     if tardias_o_variables:
         semaforo["desaceleraciones"] = "amarillo"
-        razones.append(f"{len(tardias_o_variables)} desaceleración(es) tardía(s)/variable(s) sin cumplir criterio patológico.")
+        etiqueta = "repetitiva(s)" if repetitivas else "sin cumplir criterio patológico"
+        razones.append(f"{len(tardias_o_variables)} desaceleración(es) tardía(s)/variable(s) {etiqueta}.")
     if basal < BASAL_MIN_NORMAL or basal > BASAL_MAX_NORMAL:
         razones.append(f"Línea base fuera de rango normal ({basal:.0f} lpm).")
     if variabilidad != "normal":
