@@ -348,7 +348,14 @@ def clasificar_figo(features: dict) -> dict:
     desaceleraciones = features["desaceleraciones"]
     sinusoidal = features["patron_sinusoidal"]["presente"]
 
-    tardias_o_variables = [d for d in desaceleraciones if d.get("tipo") in ("tardia", "variable")]
+    # "indeterminada" no es una categoría benigna aparte: es una desaceleración real que
+    # _clasificar_tipo_desaceleracion() no pudo correlacionar con picos de UA (típicamente
+    # porque el panel UA quedó mal digitalizado/sin picos detectables, no porque el evento
+    # en sí sea leve). Tratarla como invisible para la clasificación dejaba pasar
+    # desaceleraciones grandes y prolongadas como "Normal" solo por falta de dato de UA
+    # (caso real: -59 lpm / 230s sin contar para nada). Se la trata igual que
+    # tardía/variable — no darle el beneficio de la duda a un evento sin clasificar.
+    tardias_o_variables = [d for d in desaceleraciones if d.get("tipo") in ("tardia", "variable", "indeterminada")]
     hay_desacel_muy_prolongada = any(d["muy_prolongada"] for d in desaceleraciones)
 
     razones = []

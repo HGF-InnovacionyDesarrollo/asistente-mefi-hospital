@@ -181,6 +181,18 @@ def _imagen_bytes_desde_archivo(archivo_subido, extension):
     return archivo_subido.getvalue(), DPI_RENDER_PDF  # aprox. para fotos: no traen DPI real
 
 
+def _nombre_archivo_anonimizado(sufijo: str) -> str:
+    """Genera un nombre de archivo a partir de la hora de subida, nunca del nombre
+    original del archivo subido — ese nombre puede traer el nombre real del paciente
+    (pasó en la práctica: un CSV digitalizado quedó guardado como
+    "Javiera Antonia Millán Ortiz ..._extraido.csv" porque se usaba
+    `archivo_subido.name` directo). Ver convención en data/README.md."""
+    import datetime
+
+    marca = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    return f"{marca}{sufijo}"
+
+
 ANCHO_ZOOM_PX = 1400  # cuanto ancho de imagen ORIGINAL entra en la ventana de zoom
 
 
@@ -265,10 +277,11 @@ if archivo_subido is not None:
 
     if extension == ".csv":
         try:
-            ruta_destino = os.path.join("data", archivo_subido.name)
+            nombre_anonimo = _nombre_archivo_anonimizado(".csv")
+            ruta_destino = os.path.join("data", nombre_anonimo)
             with open(ruta_destino, "wb") as f:
                 f.write(archivo_subido.getbuffer())
-            resultado = procesar_mefi(archivo_subido.name)
+            resultado = procesar_mefi(nombre_anonimo)
             st.subheader("Resultados del análisis")
             st.table({
                 "Métrica": ["Media FCF (lpm)", "Variabilidad FCF (desv. estándar)"],
@@ -352,9 +365,11 @@ if archivo_subido is not None:
             for adv in resultado.advertencias:
                 st.info(adv)
 
-            nombre_csv = os.path.splitext(archivo_subido.name)[0] + "_extraido.csv"
-            ruta_destino = os.path.join("data", nombre_csv)
+            os.makedirs("data/extracted", exist_ok=True)
+            nombre_csv = _nombre_archivo_anonimizado("_extraido.csv")
+            ruta_destino = os.path.join("data/extracted", nombre_csv)
             resultado.df.to_csv(ruta_destino, index=False)
+            st.caption(f"Guardado como `{ruta_destino}` (nombre anonimizado, no el del archivo subido).")
             with st.expander("Ver CSV digitalizado"):
                 st.dataframe(resultado.df)
 
