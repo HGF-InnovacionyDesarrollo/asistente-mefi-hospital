@@ -1,7 +1,9 @@
 pandas
 numpy
+scipy
 scikit-learn
 streamlit
+streamlit-image-coordinates
 matplotlib
 pillow
 opencv-python
@@ -10,3 +12,5 @@ openai
 pyyaml
 python-dotenv
 pymupdf
+wfdb
+pytest

@@ -26,13 +26,17 @@ def get_llm_client():
     
     base_url = prov_config["base_url"]
     modelo = prov_config["model"]
-    
+
     if prov_config.get("needs_api_key", False):
-        api_key = os.getenv("OPENROUTER_API_KEY")
+        api_key_env = prov_config.get("api_key_env")
+        api_key = os.getenv(api_key_env) if api_key_env else None
         if not api_key:
-            raise ValueError("⚠️ Se requiere una OPENROUTER_API_KEY en el archivo .env para usar OpenRouter.")
+            raise ValueError(
+                f"⚠️ Se requiere la variable {api_key_env} en el archivo .env para usar "
+                f"{prov_config.get('label', proveedor_activo)}."
+            )
     else:
-        api_key = "ollama-local-key" # Ollama no valida llave real, pero el SDK exige un string
+        api_key = "local-key" # Proveedores locales no validan llave real, pero el SDK exige un string
 
     client = OpenAI(
         base_url=base_url,
