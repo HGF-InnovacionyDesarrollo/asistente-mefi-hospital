@@ -5,3 +5,9 @@ __pycache__/
 *.pyc
 fixtures/
 data/ctu_uhb/
+data/raw_scans/*
+data/processed_scans/*
+!data/raw_scans/.gitkeep
+!data/processed_scans/.gitkeep
+data/extracted/ctu_uhb/
+data/extracted/ctu_uhb_outcomes.csv

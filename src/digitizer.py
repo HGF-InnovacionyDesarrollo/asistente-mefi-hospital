@@ -10,6 +10,7 @@ confianza suficiente. Ver plan en C:\\Users\\usuariohgf\\.claude\\plans\\compose
 from __future__ import annotations
 
 import io
+import re
 from dataclasses import dataclass, field
 
 import numpy as np
@@ -37,6 +38,13 @@ def _configurar_tesseract() -> bool:
 _TESSERACT_OK = _configurar_tesseract()
 
 PALABRAS_CLAVE_PANEL = ("fhr", "ua", "bpm", "mmhg", "kpa", "fcf")
+
+# Términos clínicos que, si aparecen anotados a mano cerca del panel UA, cambian la
+# interpretación del registro (ej. peridural -> posible hipotensión materna).
+PALABRAS_CLAVE_CLINICAS = (
+    "peridural", "epidural", "oxitocina", "ocitocina", "meconio",
+    "anestesia", "cesarea", "cesárea", "forceps", "fórceps",
+)
 
 
 # --------------------------------------------------------------------------
@@ -486,6 +494,85 @@ def digitalizar(
     prep.advertencias = advertencias
 
     return digitalizar_con_calibracion(prep, cal_fcf, cal_ua)
+
+
+# --------------------------------------------------------------------------
+# Metadatos de cabecera y anotaciones clínicas (OCR de mejor esfuerzo)
+# --------------------------------------------------------------------------
+
+
+def extraer_metadatos_cabecera(imagen_bytes: bytes) -> dict:
+    """OCR de mejor esfuerzo sobre la franja superior del papel (cabecera impresa):
+    ID de registro, FHR impreso, fecha/hora de inicio, velocidad de papel.
+
+    Igual que la calibración de ejes por OCR (ver `_calibrar_eje_ocr`), la confianza en
+    fotos/escaneos reales es baja y variable — este resultado debe mostrarse en la UI
+    como sugerencia editable, nunca como valor autoritativo. El procesamiento es 100%
+    local (no se envía a ningún proveedor LLM).
+    """
+    resultado = {
+        "id": None,
+        "fhr_bpm": None,
+        "fecha_hora": None,
+        "velocidad_papel_cm_min": None,
+        "texto_crudo": "",
+    }
+    if not _TESSERACT_OK:
+        return resultado
+
+    imagen = Image.open(io.BytesIO(imagen_bytes)).convert("RGB")
+    cabecera = imagen.crop((0, 0, imagen.width, int(imagen.height * 0.12)))
+    gris = ImageOps.autocontrast(ImageOps.grayscale(cabecera), cutoff=1)
+    try:
+        texto = pytesseract.image_to_string(gris, config="--psm 6")
+    except pytesseract.TesseractError:
+        return resultado
+    resultado["texto_crudo"] = texto
+
+    m = re.search(r"\bID[:\s]+([A-Za-z0-9\-]+)", texto)
+    if m:
+        resultado["id"] = m.group(1)
+    m = re.search(r"FHR\s*(\d{2,3})\s*bpm", texto, re.IGNORECASE)
+    if m:
+        resultado["fhr_bpm"] = int(m.group(1))
+    m = re.search(r"(\d{4}-\d{2}-\d{2}[ T]\d{1,2}[:h]\d{2}(?::\d{2})?)", texto)
+    if m:
+        resultado["fecha_hora"] = m.group(1)
+    m = re.search(r"(\d+(?:\.\d+)?)\s*cm\s*/\s*min", texto, re.IGNORECASE)
+    if m:
+        resultado["velocidad_papel_cm_min"] = float(m.group(1))
+
+    return resultado
+
+
+def detectar_anotaciones_clinicas(prep: PreparacionImagen) -> list[str]:
+    """Busca términos clínicos manuscritos/impresos en la franja debajo del panel UA
+    (donde suelen anotarse eventos como "Peridural") vía OCR de mejor esfuerzo.
+
+    No clasifica el impacto clínico del hallazgo — solo lo reporta como advertencia
+    para que el clínico lo confirme y para que `prompts.py` lo incluya como contexto
+    textual del informe."""
+    if not _TESSERACT_OK:
+        return []
+    h, w = prep.gris.shape
+    alto_ua = prep.panel_ua.y1 - prep.panel_ua.y0
+    y0 = prep.panel_ua.y1
+    y1 = min(h, y0 + int(alto_ua * 0.5))
+    if y1 <= y0:
+        return []
+    franja = prep.gris[y0:y1, :]
+    franja_img = ImageOps.autocontrast(Image.fromarray(franja.astype(np.uint8)), cutoff=1)
+    try:
+        texto = pytesseract.image_to_string(franja_img, config="--psm 6")
+    except pytesseract.TesseractError:
+        return []
+
+    texto_bajo = texto.lower()
+    hallazgos = [p for p in PALABRAS_CLAVE_CLINICAS if p in texto_bajo]
+    return [
+        f'Anotación clínica detectada en el papel: "{p}" (verificar manualmente, puede alterar la interpretación del registro).'
+        for p in hallazgos
+    ]
 
 
 def _dibujar_overlay(imagen, panel_fcf, panel_ua, curva_fcf_px, conf_fcf, curva_ua_px, conf_ua):
