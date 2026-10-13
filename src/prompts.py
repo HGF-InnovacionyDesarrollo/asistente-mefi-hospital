@@ -36,6 +36,8 @@ interpretarlas clínicamente, no releerlas.
 - Desaceleración "muy prolongada" (criterio patológico directo): >={clinical.DESACEL_MUY_PROLONGADA_S // 60} min.
 - Patrón sinusoidal: oscilación regular {clinical.SINUSOIDAL_FRECUENCIA_MIN_CPM}-{clinical.SINUSOIDAL_FRECUENCIA_MAX_CPM}
   ciclos/min, amplitud {clinical.SINUSOIDAL_AMPLITUD_MIN}-{clinical.SINUSOIDAL_AMPLITUD_MAX} lpm.
+- Contracciones (NICE NG229): <5 en 10 min es blanco; 5 o más en 10 minutos (con menor
+  tiempo de reposo) es ámbar y por sí solo descalifica de Categoría I.
 - Categorías FIGO 2015: I (Normal) / II (Sospechoso) / III (Patológico).
 
 ## 4. RAZONAMIENTO ESPERADO
@@ -80,7 +82,13 @@ def construir_prompt_usuario(features: dict) -> str:
         lineas.append(f"- {a['inicio_s']:.0f}s-{a['fin_s']:.0f}s, +{a['amplitud_max_lpm']:.0f} lpm.")
 
     lineas.append("")
-    lineas.append(f"## Desaceleraciones\n{len(desaceleraciones)} detectada(s).")
+    area_total = features.get("area_desaceleraciones_lpm_s")
+    lineas.append(
+        f"## Desaceleraciones\n{len(desaceleraciones)} detectada(s)"
+        + (f" — área total bajo la curva: {area_total} lpm·s "
+           f"(severidad cuantitativa acumulada: a mayor área, mayor carga hipóxica "
+           f"transitoria sufrida)." if area_total is not None else ".")
+    )
     for d in desaceleraciones[:10]:
         marcas = []
         if d.get("prolongada"):
@@ -103,13 +111,24 @@ def construir_prompt_usuario(features: dict) -> str:
         lineas.append(f"## Patrón sinusoidal\nNo detectado ({sinusoidal.get('motivo', 'sin hallazgos')}).")
 
     lineas.append("")
+    contr = features.get("contracciones") or {}
+    if contr.get("num") is not None:
+        lineas.append(
+            f"## Contracciones uterinas\n{contr['num']} detectada(s) "
+            f"({contr.get('por_10min')} por 10 minutos) — "
+            + ("**tachisistolia** (criterio ámbar NICE NG229)." if contr.get("tachisistolia") else "frecuencia dentro de rango normal.")
+        )
+    else:
+        lineas.append("## Contracciones uterinas\nSin datos de UA para evaluar frecuencia.")
+    lineas.append("")
     lineas.append(
         f"## Clasificación FIGO 2015 (ya calculada determinísticamente)\n"
         f"**Categoría {figo['categoria']} — {figo['descripcion']}**\n"
         f"Razones: {'; '.join(figo['razones'])}\n"
         f"Semáforo NICE: línea base={figo['semaforo_nice']['linea_base']}, "
         f"variabilidad={figo['semaforo_nice']['variabilidad']}, "
-        f"desaceleraciones={figo['semaforo_nice']['desaceleraciones']}."
+        f"desaceleraciones={figo['semaforo_nice']['desaceleraciones']}, "
+        f"contracciones={figo['semaforo_nice'].get('contracciones', 'verde')}."
     )
 
     return "\n".join(lineas)

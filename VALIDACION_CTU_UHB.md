@@ -185,6 +185,29 @@ Una vez que valides que la clasificación FIGO funciona correctamente sobre CTU-
 
 ---
 
-**Última actualización**: 2026-08-18  
-**Estado**: ✓ Validación funcional completada (Fase 4 de 6)  
-**Siguiente**: Disclaimer clínico + Gobernanza (Fase 5)
+## Addendum: línea de base ampliada (13-oct-2026)
+
+Resultados del batch de 552 registros con el detector de contracciones v2 y las
+métricas nuevas (`scripts/validar_ctu_uhb.py --all`; contexto completo en
+[CHECKPOINT.md](CHECKPOINT.md) §-2 y [ESTADO_DELARTE_2026.md](ESTADO_DELARTE_2026.md)):
+
+| Métrica | Valor (oct 2026) | Valor (ago 2026) |
+|---|---|---|
+| Sensibilidad (FIGO II/III vs pH < 7.05) | 95.0% (VP 38, FN 2) | 95.0% (VP 38, FN 2) |
+| Especificidad | 11.1% (VN 57, FP 455) | 12.3% (VN 63, FP 449) |
+| PPV / NPV | 7.7% / 96.6% | — |
+| Exactitud balanceada | 53.1% | — |
+| AUROC área desaceleraciones | 0.710 | — |
+| AUROC línea base / variabilidad | 0.624 / 0.561 | — |
+| Contracciones detectadas (mediana/registro) | 11-17 (~2/10 min) | 90 (12.6/10 min, imposible) |
+
+La caída de especificidad 12.3%→11.1% es un efecto de la subclasificación más
+fiel de las desaceleraciones (menos "precoz" espurios por picos de UA falsos),
+no del criterio de tachisistolia (0 registros afectados en CTU-UHB). Sensibilidad
+intacta. El criterio FIGO real (>50% de contracciones) fue re-evaluado con el
+detector nuevo: 67.5%/64.3% — **no adoptado** (viola la regla de no bajar
+sensibilidad).
+
+**Última actualización**: 2026-10-13  
+**Estado**: ✓ Validación ampliada con métricas de la literatura (AUC/PPV/NPV)  
+**Siguiente**: Score continuo de riesgo como propuesta futura; validación en población local antes de cualquier uso clínico

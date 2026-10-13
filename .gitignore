@@ -11,3 +11,5 @@ data/processed_scans/*
 !data/processed_scans/.gitkeep
 data/extracted/ctu_uhb/
 data/extracted/ctu_uhb_outcomes.csv
+Casos/
+src/data/

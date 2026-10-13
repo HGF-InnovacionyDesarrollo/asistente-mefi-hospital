@@ -19,6 +19,8 @@ from dataclasses import dataclass, field
 
 import numpy as np
 import pandas as pd
+from scipy.ndimage import median_filter
+from scipy.signal import butter, filtfilt, find_peaks
 
 # --------------------------------------------------------------------------
 # Umbrales clínicos (FIGO 2015 / NICE NG229)
@@ -39,6 +41,9 @@ DESACEL_PROLONGADA_MIN_S = 180  # >=3 min: "prolongada" (relevante para clasific
 DESACEL_MUY_PROLONGADA_S = 300  # >=5 min: criterio patológico directo (FIGO)
 
 TOLERANCIA_COINCIDENCIA_S = 20  # ventana para asociar nadir de desaceleración con pico de UA
+TOLERANCIA_ASOCIACION_CONTRACCION_S = 90  # ventana (más laxa) para saber si una desaceleración
+# ocurrió "con" una contracción, sin importar el tipo — usado para el criterio de
+# "repetitivas" de FIGO (>50% de las contracciones), no para la subclasificación precoz/tardía
 
 SINUSOIDAL_DURACION_MIN_S = 600  # 10 min continuos mínimos para evaluar el patrón
 SINUSOIDAL_FRECUENCIA_MIN_CPM = 3.0
@@ -115,17 +120,22 @@ def calcular_variabilidad(df: pd.DataFrame, basal: float, ventana_s: float = 60.
     amplitudes = sub.groupby(bins)["fcf"].agg(lambda s: s.max() - s.min() if len(s) >= 2 else np.nan)
     amplitudes = amplitudes.dropna()
 
-    amplitud_media = float(amplitudes.mean()) if len(amplitudes) else 0.0
+    # Mediana, no promedio: unas pocas ventanas ruidosas (dropout de sensor no del
+    # todo filtrado, artefacto puntual) inflan el promedio del trazado completo y
+    # lo categorizan "aumentada" aunque la mayoría de las ventanas sean normales.
+    # La mediana refleja el patrón predominante, que es lo que NICE NG229 evalúa
+    # (variabilidad sostenida, no picos aislados).
+    amplitud_repr = float(amplitudes.median()) if len(amplitudes) else 0.0
 
-    if amplitud_media < VARIABILIDAD_REDUCIDA_MAX:
+    if amplitud_repr < VARIABILIDAD_REDUCIDA_MAX:
         categoria = "reducida"
-    elif amplitud_media <= VARIABILIDAD_NORMAL_MAX:
+    elif amplitud_repr <= VARIABILIDAD_NORMAL_MAX:
         categoria = "normal"
     else:
         categoria = "aumentada"
 
     return {
-        "amplitud_media_lpm": round(amplitud_media, 1),
+        "amplitud_media_lpm": round(amplitud_repr, 1),
         "categoria": categoria,
         "ventanas_evaluadas": int(len(amplitudes)),
     }
@@ -178,24 +188,109 @@ def detectar_aceleraciones(df: pd.DataFrame, basal: float) -> list[dict]:
     return eventos
 
 
-def _picos_contraccion(df: pd.DataFrame, prominencia: float = 10.0) -> list[float]:
-    """Tiempos (s) de los picos de actividad uterina — máximos locales de `ua`
-    que superan el tono de reposo (percentil 20) en al menos `prominencia`."""
-    sub = df.loc[df.get("ua_confiable", pd.Series(True, index=df.index)).astype(bool)].sort_values("tiempo")
-    sub = sub.dropna(subset=["ua"])
-    if len(sub) < 3:
+def detectar_contracciones(df: pd.DataFrame) -> list[float]:
+    """Tiempos (s) de los picos de contracciones uterinas, con preprocesamiento
+    clásico de señal TOCO con respaldo en la literatura de monitoreo fetal
+    computarizado:
+
+    1. Re-muestreo a grilla uniforme en el dt mediano (filtros IIR y detección
+       de picos requieren muestreo regular).
+    2. Mediana corta (~7s): elimina el jitter de muestra a muestra sin deformar
+       la contracción (que dura 30-90s).
+    3. Filtro pasabajos Butterworth zero-phase de 0.04 Hz: suprime la respiración
+       materna (0.2-0.5 Hz), el artefacto dominante del TOCO (Stony Brook
+       uterine-contraction ID; algoritmo clásico Dawood-Redman/Sonicaid).
+    4. Tono de reposo = mediana móvil larga (~5 min): sigue la deriva del tono
+       basal, a diferencia del percentil 20 global que usaba la versión previa.
+    5. find_peaks sobre la señal sin tono, con prominencia relativa a la escala
+       robusta del registro (p95-p20), separación mínima de 45s y duración
+       mínima de 30s al 50% de prominencia — umbrales fisiológicos, no absolutos,
+       así que sirve igual para UA en % (CTU-UHB) que en mmHg (digitalizador),
+       dado que el TOCO no es cuantitativo de todas formas (mide cambio de
+       contorno abdominal, no presión intrauterina).
+
+    Validado contra CTU-UHB (552 registros): mediana 17 contracciones por
+    registro (~80 min) = 2.4/10 min, rango p5-p95 de 8-26 por registro —
+    coherente con trabajo de parto activo. La versión previa (máximos locales
+    sobre la señal cruda) daba una mediana de 90 por registro (12.6/10 min),
+    incompatible con la fisiología y la razón por la que el criterio real de
+    FIGO (>50% de contracciones) fracasó en el intento del 26-ago-2026.
+    """
+    sub = df.loc[df.get("ua_confiable", pd.Series(True, index=df.index)).astype(bool)]
+    sub = sub.dropna(subset=["ua"]).sort_values("tiempo")
+    if len(sub) < 20:
         return []
 
-    tono_reposo = float(np.percentile(sub["ua"], 20))
-    valores = sub["ua"].to_numpy()
-    tiempos = sub["tiempo"].to_numpy()
+    tiempo = sub["tiempo"].to_numpy(float)
+    valores = sub["ua"].to_numpy(float)
 
-    picos = []
-    for i in range(1, len(valores) - 1):
-        if valores[i] >= valores[i - 1] and valores[i] >= valores[i + 1]:
-            if valores[i] - tono_reposo >= prominencia:
-                picos.append(tiempos[i])
-    return picos
+    dt = float(np.median(np.diff(tiempo)))
+    if dt <= 0:
+        return []
+    t_uniforme = np.arange(tiempo[0], tiempo[-1] + dt / 2, dt)
+    if len(t_uniforme) < 20:
+        return []
+    ua = np.interp(t_uniforme, tiempo, valores)
+
+    n_med_corta = max(3, int(round(7.0 / dt)) | 1)
+    ua = median_filter(ua, size=n_med_corta, mode="nearest")
+
+    fs = 1.0 / dt
+    if fs > 0.2:
+        wn = min(0.04 / (fs / 2), 0.99)
+        if wn < 0.99:
+            b, a = butter(4, wn, btype="low")
+            ua = filtfilt(b, a, ua)
+
+    n_baseline = max(n_med_corta, int(round(300.0 / dt)) | 1)
+    tono = median_filter(ua, size=n_baseline, mode="nearest")
+    detrend = ua - tono
+
+    escala = float(np.percentile(detrend, 95) - np.percentile(detrend, 20))
+    if escala <= 0:
+        return []
+
+    # Piso anti-ruido: con UA sin contracciones reales la escala robusta se
+    # achica hasta el nivel del ruido y un umbral puramente relativo admite
+    # picos espurios de la deriva residual. La prominencia debe superar:
+    # - el 15% de la escala robusta del registro, y
+    # - ~4 sigmas del ruido de fondo, estimado con la dispersión del tramo
+    #   INFERIOR de la señal sin tono (percentil 40 hacia abajo): esa porción
+    #   contiene casi solo reposo aunque las contracciones ocupen hasta ~50%
+    #   del registro (MAD global queda inflado por las propias contracciones
+    #   cuando su duty cycle es alto — fue el bug del primer intento), y
+    # - un mínimo absoluto pequeño (una contracción real de TOCO supera el
+    #   tono en >=10-20 unidades, así que 3 unidades no descarta nada
+    #   fisiológico en las escalas típicas % / mmHg).
+    parte_baja = detrend[detrend <= np.percentile(detrend, 40)]
+    sigma_ruido = float(np.std(parte_baja)) if len(parte_baja) > 10 else 0.0
+    prominencia = max(0.15 * escala, 4.0 * sigma_ruido, 3.0)
+
+    picos, _ = find_peaks(
+        detrend,
+        prominence=prominencia,
+        distance=max(1, int(round(45.0 / dt))),
+        width=max(1, int(round(30.0 / dt))),
+        rel_height=0.5,
+    )
+
+    # Fusionar picos a <30s por si una meseta plana escapó al `distance` de
+    # find_peaks (misma razón que la versión previa: evitar duplicar una
+    # contracción real en el conteo).
+    fusionados = []
+    for p in picos:
+        t = float(t_uniforme[p])
+        if fusionados and t - fusionados[-1] < 30.0:
+            continue
+        fusionados.append(t)
+    return fusionados
+
+
+def _picos_contraccion(df: pd.DataFrame, prominencia: float = 10.0) -> list[float]:
+    """Alias de compatibilidad hacia `detectar_contracciones()` — el parámetro
+    `prominencia` se conserva solo en la firma para no romper llamadas viejas;
+    el detector nuevo usa umbrales relativos a la escala del registro."""
+    return detectar_contracciones(df)
 
 
 def detectar_desaceleraciones(df: pd.DataFrame, basal: float, incluir_subclasificacion: bool = True) -> list[dict]:
@@ -232,6 +327,15 @@ def detectar_desaceleraciones(df: pd.DataFrame, basal: float, incluir_subclasifi
 
         if incluir_subclasificacion:
             evento["tipo"] = _clasificar_tipo_desaceleracion(onset_a_nadir, t_nadir, picos_ua)
+            if picos_ua:
+                pico_cercano = min(picos_ua, key=lambda p: abs(p - t_nadir))
+                evento["pico_ua_asociado_s"] = (
+                    float(pico_cercano)
+                    if abs(t_nadir - pico_cercano) <= TOLERANCIA_ASOCIACION_CONTRACCION_S
+                    else None
+                )
+            else:
+                evento["pico_ua_asociado_s"] = None
 
         eventos.append(evento)
     return eventos
@@ -321,11 +425,19 @@ def _hay_desaceleraciones_repetitivas(decels: list[dict], ventana_s: float = 120
     """Proxy de "desaceleraciones repetitivas" (FIGO 2015 define Categoría I como
     "sin desaceleraciones repetitivas", asociadas a más del 50% de las contracciones):
     3 o más desaceleraciones tardías/variables dentro de cualquier ventana de 20
-    minutos. Una o dos aisladas no deberían sacar el registro de Categoría I —
-    tratarlas como descalificantes por sí solas es más estricto que la guía real y
-    en intraparto (donde la compresión de cordón durante contracciones es casi
-    universal) arrastra prácticamente todo a "sospechoso" (confirmado: 482 de 552
-    registros de CTU-UHB caían en Categoría II solo por esto antes de este fix)."""
+    minutos. Una o dos aisladas no deberían sacar el registro de Categoría I.
+
+    Se intentó reemplazar este proxy por la proporción real de contracciones
+    asociadas (usando `pico_ua_asociado_s` / `num_contracciones`, ambos ya
+    calculados): subió la especificidad de 12.5% a 78.9% contra los 552 registros
+    de CTU-UHB, pero a costa de la sensibilidad (95%→67.5%, falsos negativos de
+    2→13) — el detector de picos de UA no es lo bastante confiable sobre señales
+    reales/ruidosas como para usarlo de criterio excluyente. Para una herramienta
+    de apoyo a decisión clínica, perder casos reales de hipoxia es mucho peor que
+    una falsa alarma de más, así que se descartó ese enfoque (se puede revisar en
+    `git log` si se mejora la detección de contracciones). `features["num_contracciones"]`
+    y `evento["pico_ua_asociado_s"]` (en cada desaceleración) quedan calculados y
+    disponibles como diagnóstico, pero no se usan en la clasificación."""
     if len(decels) < minimo:
         return False
     inicios = sorted(d["inicio_s"] for d in decels)
@@ -347,6 +459,9 @@ def clasificar_figo(features: dict) -> dict:
     variabilidad = features["variabilidad"]["categoria"]
     desaceleraciones = features["desaceleraciones"]
     sinusoidal = features["patron_sinusoidal"]["presente"]
+    contracciones = features.get("contracciones") or {}
+    por_10min = contracciones.get("por_10min")
+    tachisistolia = contracciones.get("tachisistolia", False)
 
     # "indeterminada" no es una categoría benigna aparte: es una desaceleración real que
     # _clasificar_tipo_desaceleracion() no pudo correlacionar con picos de UA (típicamente
@@ -363,6 +478,10 @@ def clasificar_figo(features: dict) -> dict:
         "linea_base": "verde" if BASAL_MIN_NORMAL <= basal <= BASAL_MAX_NORMAL else "amarillo",
         "variabilidad": {"normal": "verde", "aumentada": "amarillo", "reducida": "rojo"}[variabilidad],
         "desaceleraciones": "verde",
+        # NICE NG229 §1.4.12 evalúa contracciones como una de las 4 variables
+        # (white <5 en 10 min / amber >=5 en 10 min o hipertono). Sin datos de UA
+        # no se puede evaluar: se reporta "verde" pero con por_10min=None.
+        "contracciones": ("amarillo" if tachisistolia else "verde"),
     }
 
     # --- Categoría III (patológico): criterios que por sí solos bastan ---
@@ -390,6 +509,7 @@ def clasificar_figo(features: dict) -> dict:
         BASAL_MIN_NORMAL <= basal <= BASAL_MAX_NORMAL
         and variabilidad == "normal"
         and not repetitivas
+        and not tachisistolia
     )
     if es_normal:
         razones_normal = ["Sin hallazgos anormales."]
@@ -408,6 +528,11 @@ def clasificar_figo(features: dict) -> dict:
         razones.append(f"Línea base fuera de rango normal ({basal:.0f} lpm).")
     if variabilidad != "normal":
         razones.append(f"Variabilidad {variabilidad}.")
+    if tachisistolia:
+        razones.append(
+            f"Frecuencia de contracciones elevada ({por_10min:.1f} en 10 minutos, "
+            f"criterio ámbar NICE NG229: 5 o más)."
+        )
     if not razones:
         razones.append("No cumple todos los criterios de categoría I ni de III.")
 
@@ -433,6 +558,19 @@ def extraer_features(df: pd.DataFrame) -> dict:
     aceleraciones = detectar_aceleraciones(df, basal)
     desaceleraciones = detectar_desaceleraciones(df, basal)
     sinusoidal = detectar_patron_sinusoidal(df)
+    hay_ua = "ua" in df.columns and df["ua"].notna().any()
+    num_contracciones = len(detectar_contracciones(df)) if hay_ua else None
+    duracion_min = float((df["tiempo"].max() - df["tiempo"].min()) / 60.0) if len(df) else 0.0
+    por_10min = (num_contracciones / (duracion_min / 10.0)) if (num_contracciones and duracion_min > 0) else None
+
+    # Área total bajo las desaceleraciones (Σ amplitud × duración, lpm·s):
+    # la variable continua con mejor discriminación de hipoxia en CTU-UHB
+    # (AUROC 0.71, validación 2026-10) y la feature principal de modelos
+    # publicados (DeepCTG®: dec_area). Se expone como severidad cuantitativa
+    # para el informe; NO entra en la clasificación por categorías.
+    area_desaceleraciones = float(sum(
+        d["duracion_s"] * d["amplitud_max_lpm"] for d in desaceleraciones
+    ))
 
     features = {
         "linea_base": basal,
@@ -440,6 +578,15 @@ def extraer_features(df: pd.DataFrame) -> dict:
         "aceleraciones": aceleraciones,
         "desaceleraciones": desaceleraciones,
         "patron_sinusoidal": sinusoidal,
+        "num_contracciones": num_contracciones,
+        "area_desaceleraciones_lpm_s": round(area_desaceleraciones),
+        "contracciones": {
+            "num": num_contracciones,
+            "por_10min": round(por_10min, 1) if por_10min is not None else None,
+            # NICE NG229 §1.4.12: 5 o más contracciones en 10 minutos con menor
+            # tiempo de reposo = variable "ámbar" por sí sola.
+            "tachisistolia": bool(por_10min is not None and por_10min >= 5.0),
+        },
     }
     features["figo"] = clasificar_figo(features)
     return features

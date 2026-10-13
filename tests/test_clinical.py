@@ -194,6 +194,80 @@ def test_sinusoidal_requiere_duracion_minima():
 
 
 # --------------------------------------------------------------------------
+# Detección de contracciones (detector v2, 2026-10)
+# --------------------------------------------------------------------------
+
+
+def _ua_con_contracciones(tiempos_pico, duracion_s=1800, dt=0.25, tono=15.0,
+                          amplitud=40.0, ruido=2.0, respiracion=3.0, semilla=7):
+    """Señal TOCO sintética a 4 Hz: tono de reposo + ruido + respiración materna
+    (0.3 Hz, el artefacto que el pasabajos de 0.04 Hz debe suprimir) + bumps
+    gaussianos de `amplitud` centrados en `tiempos_pico` (segundos)."""
+    rng = np.random.default_rng(semilla)
+    tiempo = np.arange(0, duracion_s, dt)
+    ua = tono + rng.normal(0, ruido, size=len(tiempo))
+    ua += respiracion * np.sin(2 * np.pi * 0.3 * tiempo)
+    for t_pico in tiempos_pico:
+        ua += amplitud * np.exp(-0.5 * ((tiempo - t_pico) / 20.0) ** 2)
+    return _df(tiempo, np.full(len(tiempo), 140.0), ua=ua)
+
+
+def test_detectar_contracciones_cuenta_correcta():
+    df = _ua_con_contracciones(tiempos_pico=[300, 900, 1500])
+    picos = clinical.detectar_contracciones(df)
+    assert len(picos) == 3
+    for esperado, detectado in zip([300, 900, 1500], sorted(picos)):
+        assert abs(detectado - esperado) < 20  # sin deriva de fase (filtros zero-phase)
+
+
+def test_detectar_contracciones_solo_ruido_no_detecta():
+    df = _ua_con_contracciones(tiempos_pico=[], amplitud=0.0, respiracion=3.0)
+    assert clinical.detectar_contracciones(df) == []
+
+
+def test_detectar_contracciones_respiracion_no_es_contraccion():
+    """Respiración materna (0.3 Hz, ±3 unidades) no debe contarse como contracción."""
+    df = _ua_con_contracciones(tiempos_pico=[], amplitud=0.0, respiracion=6.0)
+    assert clinical.detectar_contracciones(df) == []
+
+
+def test_frecuencia_contracciones_en_features():
+    df = _ua_con_contracciones(tiempos_pico=[300, 900, 1500], duracion_s=1800)
+    features = clinical.extraer_features(df)
+    assert features["contracciones"]["num"] == 3
+    assert features["contracciones"]["por_10min"] == 1.0  # 3 contracciones en 30 min
+    assert features["contracciones"]["tachisistolia"] is False
+
+
+def test_area_desaceleraciones_en_features():
+    """Área total = Σ amplitud × duración: severidad cuantitativa expuesta para
+    el informe (feature con mejor AUROC sobre CTU-UHB, validación 2026-10)."""
+    df = _trazado_con_desaceleracion("tardia", duracion_s=400, basal=140.0)
+    features = clinical.extraer_features(df)
+    esperado = 200.0 * 40.0  # duración aprox. del evento × amplitud máx.
+    assert features["area_desaceleraciones_lpm_s"] > 0
+    assert abs(features["area_desaceleraciones_lpm_s"] - esperado) / esperado < 0.5
+
+
+def test_tachisistolia_descalifica_categoria_i():
+    """6 contracciones en 10 minutos con FCF completamente normal: el criterio
+    ámbar de contracciones de NICE NG229 (§1.4.12) debe sacar el registro de
+    Categoría I aunque la FCF sea impecable."""
+    tiempo = np.arange(0, 660, 0.25)  # 11 min
+    rng = np.random.default_rng(11)
+    fcf = 140.0 + rng.normal(0, 4.0, size=len(tiempo))  # variabilidad normal
+    ua = 15.0 + rng.normal(0, 2.0, size=len(tiempo))
+    for i in range(6):
+        t_pico = 120.0 + i * 100.0  # cada 100s → 6 en ~10 min
+        ua += 40.0 * np.exp(-0.5 * ((tiempo - t_pico) / 20.0) ** 2)
+    features = clinical.extraer_features(_df(tiempo, fcf, ua=ua))
+    assert features["contracciones"]["tachisistolia"] is True
+    assert features["figo"]["categoria"] == "II"
+    assert any("contracciones" in r.lower() for r in features["figo"]["razones"])
+    assert features["figo"]["semaforo_nice"]["contracciones"] == "amarillo"
+
+
+# --------------------------------------------------------------------------
 # Clasificación FIGO integrada
 # --------------------------------------------------------------------------
 

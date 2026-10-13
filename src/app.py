@@ -385,13 +385,23 @@ if archivo_subido is not None:
                 color_semaforo = {"verde": "🟢", "amarillo": "🟡", "rojo": "🔴"}
                 st.markdown(f"**Categoría FIGO {figo['categoria']} — {figo['descripcion']}**")
                 st.caption(" · ".join(figo["razones"]))
+                contr = features.get("contracciones") or {}
+                valor_contracciones = (
+                    f"{contr.get('num')} detectada(s)"
+                    + (f" ({contr.get('por_10min')}/10 min)" if contr.get("por_10min") is not None else "")
+                    if contr.get("num") is not None
+                    else "sin datos de UA"
+                )
                 st.table({
-                    "Variable": ["Línea base", "Variabilidad", "Aceleraciones", "Desaceleraciones", "Patrón sinusoidal"],
+                    "Variable": ["Línea base", "Variabilidad", "Aceleraciones", "Desaceleraciones", "Contracciones", "Patrón sinusoidal"],
                     "Valor": [
                         f"{features['linea_base']:.0f} lpm",
                         f"{features['variabilidad']['amplitud_media_lpm']} lpm ({features['variabilidad']['categoria']})",
                         f"{len(features['aceleraciones'])} detectada(s)",
-                        f"{len(features['desaceleraciones'])} detectada(s)",
+                        f"{len(features['desaceleraciones'])} detectada(s)"
+                        + (f" (área total {features['area_desaceleraciones_lpm_s']:,} lpm·s)".replace(",", ".")
+                           if features.get("area_desaceleraciones_lpm_s") is not None else ""),
+                        valor_contracciones,
                         "presente" if features["patron_sinusoidal"]["presente"] else "no detectado",
                     ],
                     "Semáforo NICE": [
@@ -399,6 +409,7 @@ if archivo_subido is not None:
                         color_semaforo[figo["semaforo_nice"]["variabilidad"]],
                         "—",
                         color_semaforo[figo["semaforo_nice"]["desaceleraciones"]],
+                        color_semaforo[figo["semaforo_nice"].get("contracciones", "verde")],
                         "—",
                     ],
                 })

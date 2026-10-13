@@ -263,6 +263,7 @@ def validar_batch(data_dir: str = "data/ctu_uhb", verbose: bool = False) -> dict
     resultados = []
     vp = fp = vn = fn = 0
     sin_ph = 0
+    filas_métricas = []
 
     for record_id in record_ids:
         try:
@@ -299,9 +300,32 @@ def validar_batch(data_dir: str = "data/ctu_uhb", verbose: bool = False) -> dict
         else:
             fn += 1
 
+        # Features continuos interpretables para el análisis AUROC (evaluación
+        # del estado del arte 2026-10: sensibilidad/especificidad binarias no
+        # alcanzan para comparar contra la literatura, que reporta AUC 0.68-0.75
+        # sobre CTU-UHB para los mejores modelos).
+        f = r["features"]
+        decels_tv = [d for d in f["desaceleraciones"]
+                     if d.get("tipo") in ("tardia", "variable", "indeterminada")]
+        area_decels = float(sum(d["duracion_s"] * d["amplitud_max_lpm"] for d in decels_tv))
+        area_acels = float(sum(a["duracion_s"] * a["amplitud_max_lpm"] for a in f["aceleraciones"]))
+        filas_métricas.append({
+            "ph": ph,
+            "hipoxia": hipoxia_real,
+            "n_decels_tv": len(decels_tv),
+            "area_decels": area_decels,
+            "area_acels": area_acels,
+            "variabilidad_lpm": f["variabilidad"]["amplitud_media_lpm"],
+            "basal": f["linea_base"],
+            "n_contracciones": f.get("num_contracciones") or 0,
+        })
+
     n_con_ph = vp + fp + vn + fn
     sensibilidad = vp / (vp + fn) if (vp + fn) else None
     especificidad = vn / (vn + fp) if (vn + fp) else None
+    ppv = vp / (vp + fp) if (vp + fp) else None
+    npv = vn / (vn + fn) if (vn + fn) else None
+    bal_acc = ((sensibilidad or 0) + (especificidad or 0)) / 2
 
     print(f"\n{'='*70}")
     print(f"RESUMEN BATCH — {len(resultados)} registros procesados, {n_con_ph} con pH disponible, {sin_ph} sin pH")
@@ -317,6 +341,31 @@ def validar_batch(data_dir: str = "data/ctu_uhb", verbose: bool = False) -> dict
         print(f"\nSensibilidad: {sensibilidad:.1%}")
     if especificidad is not None:
         print(f"Especificidad: {especificidad:.1%}")
+    if ppv is not None:
+        print(f"PPV: {ppv:.1%}  (prevalencia hipoxia: {(vp + fn)}/{n_con_ph} = {(vp + fn)/n_con_ph:.1%})")
+    if npv is not None:
+        print(f"NPV: {npv:.1%}")
+    print(f"Exactitud balanceada: {bal_acc:.1%}")
+
+    # --- AUROC de features continuos interpretables ---
+    # El estado del arte (ver ESTADO_DELARTE_2026.md) compara modelos por AUC
+    # sobre CTU-UHB: 0.68-0.75 para los métodos bien evaluados. Reportar AUC
+    # de features individuales da el contexto honesto para la matriz binaria.
+    if filas_métricas:
+        try:
+            from sklearn.metrics import roc_auc_score
+
+            df_m = pd.DataFrame(filas_métricas)
+            y = df_m["hipoxia"].astype(int)
+            print(f"\nAUROC de features continuos (vs pH < {PH_UMBRAL_HIPOXIA}):")
+            for col in ("n_decels_tv", "area_decels", "area_acels", "variabilidad_lpm", "basal", "n_contracciones"):
+                try:
+                    auc = roc_auc_score(y, df_m[col])
+                    print(f"  {col}: {auc:.3f}")
+                except Exception as e:
+                    print(f"  {col}: no computable ({e})")
+        except ImportError:
+            print("\n(sklearn no disponible — AUROC omitido)")
 
     return {
         "n_registros": len(resultados),
