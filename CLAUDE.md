@@ -47,8 +47,11 @@ referencia al ensayo INFANT (Lancet 2017).
 ## 3. Entorno
 
 - `venv/` con **Python 3.14.5**. Invocar como `./venv/Scripts/python.exe`.
-- Correr la app: `PYTHONIOENCODING=utf-8 streamlit run src/app.py`.
-- Tests: `./venv/Scripts/python.exe -m pytest tests/ -q` (19/19 en verde hoy).
+- Correr la app: `PYTHONIOENCODING=utf-8 streamlit run src/app.py`. Para usuarios
+  no técnicos existe `MEFI.bat` en la raíz (doble clic: crea venv si falta,
+  instala dependencias la primera vez —marcador `venv\.listo`—, abre el
+  navegador en :8501 y lanza streamlit).
+- Tests: `./venv/Scripts/python.exe -m pytest tests/ -q` (25/25 en verde hoy).
 - `pytesseract` necesita `tesseract_cmd` apuntado a mano — no está en el PATH.
   En otra máquina: `winget install --id UB-Mannheim.TesseractOCR -e`.
 - Secretos en `.env` y `.streamlit/secrets.toml`, ambos gitignored. Nunca en

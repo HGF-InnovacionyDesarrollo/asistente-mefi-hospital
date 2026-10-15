@@ -18,6 +18,7 @@ import pandas as pd
 import pytesseract
 from PIL import Image, ImageDraw, ImageOps
 from scipy.ndimage import median_filter
+from scipy.signal import find_peaks
 
 TESSERACT_CANDIDATES = [
     r"C:\Users\usuariohgf\AppData\Local\Programs\Tesseract-OCR\tesseract.exe",
@@ -208,17 +209,19 @@ def _detectar_paneles(gris: np.ndarray) -> tuple[LimitesPanel, LimitesPanel] | N
 # --------------------------------------------------------------------------
 
 
-def _calibrar_eje_ocr(gris: np.ndarray, panel: LimitesPanel, ancho_margen_frac: float = 0.10) -> CalibracionEje | None:
-    """Lee las etiquetas numéricas impresas en el margen izquierdo del panel y ajusta
-    una recta valor = a*y + b. Devuelve None si no hay al menos 2 lecturas numéricas
-    consistentes (monótonas) para anclar la calibración."""
+def _leer_etiquetas_eje(gris: np.ndarray, panel: LimitesPanel,
+                        ancho_margen_frac: float = 0.10) -> list[tuple[float, int]]:
+    """OCR del margen izquierdo del panel: devuelve [(y_en_panel, valor)] con
+    las etiquetas numéricas leídas (mejor esfuerzo; puede faltar o confundir
+    dígitos en fotos ruidosas — por eso el uso es de SUGERENCIA, con
+    verificación humana, no de calibración directa)."""
     if not _TESSERACT_OK:
-        return None
+        return []
     h, w = gris.shape
     ancho_margen = max(int(w * ancho_margen_frac), 40)
     franja = gris[panel.y0:panel.y1, 0:ancho_margen]
     if franja.size == 0:
-        return None
+        return []
     franja_img = Image.fromarray(franja.astype(np.uint8))
     factor = max(1, 900 // max(franja_img.width, 1))
     franja_img = franja_img.resize((franja_img.width * factor, franja_img.height * factor), Image.LANCZOS)
@@ -227,16 +230,22 @@ def _calibrar_eje_ocr(gris: np.ndarray, panel: LimitesPanel, ancho_margen_frac: 
     try:
         data = pytesseract.image_to_data(franja_img, config="--psm 6", output_type=pytesseract.Output.DICT)
     except pytesseract.TesseractError:
-        return None
+        return []
 
-    puntos = []  # (y_absoluto_en_panel, valor_numerico)
+    puntos = []  # (y_en_panel, valor_numerico)
     for i, texto in enumerate(data["text"]):
         limpio = texto.strip().replace("-", "")
         if limpio.isdigit() and 0 < int(limpio) <= 300:
             y_centro_franja = data["top"][i] + data["height"][i] / 2
-            y_panel = y_centro_franja / factor
-            puntos.append((y_panel, int(limpio)))
+            puntos.append((y_centro_franja / factor, int(limpio)))
+    return puntos
 
+
+def _calibrar_eje_ocr(gris: np.ndarray, panel: LimitesPanel, ancho_margen_frac: float = 0.10) -> CalibracionEje | None:
+    """Lee las etiquetas numéricas impresas en el margen izquierdo del panel y ajusta
+    una recta valor = a*y + b. Devuelve None si no hay al menos 2 lecturas numéricas
+    consistentes (monótonas) para anclar la calibración."""
+    puntos = _leer_etiquetas_eje(gris, panel, ancho_margen_frac)
     if len(puntos) < 2:
         return None
 
@@ -250,6 +259,77 @@ def _calibrar_eje_ocr(gris: np.ndarray, panel: LimitesPanel, ancho_margen_frac: 
     confianza = max(0.0, min(1.0, 1 - residual / 20)) * min(1.0, len(puntos) / 4)
 
     return CalibracionEje(valor_por_px=pendiente, valor_en_y0=ordenada, metodo="ocr", confianza=confianza)
+
+
+def _detectar_lineas_grilla(gris: np.ndarray, panel: LimitesPanel,
+                            margen_frac: float = 0.12) -> list[int]:
+    """Filas (relativas al panel) donde hay líneas de grilla horizontales.
+
+    La grilla atraviesa todo el ancho del papel, así que oscurece levemente
+    TODAS las columnas en su fila; la curva y el texto solo tocan unas pocas.
+    Por eso se usa la MEDIANA de oscuridad por fila (la curva queda filtrada)
+    y se buscan picos periódicos suaves sobre el fondo del papel.
+    """
+    h, w = gris.shape
+    x0 = int(w * margen_frac)
+    banda = gris[panel.y0:panel.y1, x0:]
+    if banda.shape[0] < 20 or banda.shape[1] < 20:
+        return []
+    oscuridad = 255.0 - np.median(banda, axis=1)
+    suave = median_filter(oscuridad, size=3, mode="nearest")
+    p50 = float(np.median(suave))
+    # p99 y no p90: la grilla puede ocupar <10% de las filas y entonces el
+    # p90 queda en el fondo del papel y la medida de contraste da cero.
+    p99 = float(np.percentile(suave, 99))
+    if p99 - p50 < 5:  # sin contraste de grilla visible en este panel
+        return []
+    picos, _ = find_peaks(suave, height=p50 + 0.3 * (p99 - p50),
+                          distance=4, prominence=2)
+    return [int(p) for p in picos]
+
+
+def sugerir_puntos_calibracion(gris: np.ndarray, panel: LimitesPanel,
+                               valores_default: tuple[float, float] = (210.0, 30.0)
+                               ) -> list[tuple[float, float]] | None:
+    """Sugerencia SEMI-AUTOMÁTICA de calibración: pre-rellena los dos puntos
+    para que el usuario solo tenga que VERIFICAR los valores, sin clics.
+
+    Estrategia en dos niveles (mejor esfuerzo):
+    1. OCR de las etiquetas del margen izquierdo: si leyó >=2 números con
+       relación monótona consistente, se usan las dos lecturas más separadas —
+       posiciones y valores reales del papel.
+    2. Si no, detección de las líneas de grilla superior e inferior, con los
+       valores por defecto del tipo de panel (el usuario confirma/corrige).
+
+    Nunca calibra por sí sola: la decisión consciente del 11-ago-2026 de exigir
+    confirmación humana de la escala se mantiene; esto solo quita los clics.
+    """
+    puntos = _leer_etiquetas_eje(gris, panel)
+    if len(puntos) >= 2:
+        puntos = sorted(puntos)
+        mejor = None
+        for i in range(len(puntos)):
+            for j in range(i + 1, len(puntos)):
+                y1, v1 = puntos[i]
+                y2, v2 = puntos[j]
+                if y2 - y1 < 30:
+                    continue
+                # monotonía: valores deben cambiar en la dirección opuesta a y
+                if (v2 - v1) * (y2 - y1) >= 0:
+                    continue
+                if mejor is None or (y2 - y1) > mejor[0]:
+                    mejor = (y2 - y1, y1, float(v1), y2, float(v2))
+        if mejor is not None:
+            _, y1, v1, y2, v2 = mejor
+            return [(y1 + panel.y0, v1), (y2 + panel.y0, v2)]
+
+    lineas = _detectar_lineas_grilla(gris, panel)
+    if len(lineas) >= 2:
+        return [
+            (float(lineas[0] + panel.y0), float(valores_default[0])),
+            (float(lineas[-1] + panel.y0), float(valores_default[1])),
+        ]
+    return None
 
 
 def _calibrar_eje_manual(panel: LimitesPanel, rango_valor: tuple[float, float]) -> CalibracionEje:

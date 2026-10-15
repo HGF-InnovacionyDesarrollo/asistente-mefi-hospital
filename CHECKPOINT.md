@@ -1,11 +1,22 @@
 # CHECKPOINT: Asesor Clínico MEFI
 
-**Fecha última actualización:** 13 de octubre de 2026
+**Fecha última actualización:** 15 de octubre de 2026
 **Estado:** Rediseño de arquitectura en curso — **Fase 4 de 6 completa**, disclaimer clínico (Fase 5, parte 1) ya en la UI. `src/digitizer.py` (Fase 1), `src/clinical.py` + `tests/test_clinical.py` (Fase 2), `src/prompts.py` + informe por texto (Fase 3), y validación CTU-UHB (Fase 4) todos funcionales.
 
 **Extra (fuera del plan de 6 fases, a pedido del usuario):** proveedor LLM ahora 100% configurable por datos — `config.yaml` + `src/llm_client.py` generalizados (label, api_key_env por proveedor), agregado Hugging Face Router como tercera opción junto a OpenRouter/Ollama, y la sidebar de `src/app.py` permite elegir proveedor/modelo/API key y guardarlos como predeterminados sin tocar archivos a mano. Pendiente: empaquetado instalable para otros computadores del hospital (no iniciado).
 
 > El plan completo y detallado (con el porqué de cada decisión) vive en `C:\Users\usuariohgf\.claude\plans\composed-sniffing-moler.md`. Este checkpoint es el resumen ejecutivo para retomar el trabajo directamente en VS Code.
+
+---
+
+## -3. Calibración semi-automática + lanzador MEFI.bat (15 oct 2026)
+
+Pedido del usuario (asesor de innovación, no programador): (1) instalación automática de doble clic, (2) calibración semi-automática que quite los clics manuales de la calibración de ejes.
+
+- **`MEFI.bat` (raíz del repo):** doble clic → detecta Python (`py -3` o `python`, vía `where ... &&` — NO `%errorlevel%` dentro de bloques, se expande antes de ejecutar y queda con valor viejo; aprendizaje del bug del 15-oct) → crea `venv` si falta → `pip install -r requirements.txt` solo si falta el marcador `venv\.listo` (venv/ ya está gitignored, el marcador no contamina git) → avisa si falta Tesseract con el comando winget (NO se instala solo, requiere admin) → abre el navegador en :8501 → lanza streamlit. Probado de punta a punta dos veces: primera corrida completa (instala) y corrida subsiguiente (omite, ~16 s hasta HTTP 200). Gotchas batch corregidos: paréntesis sin escapar en `echo` dentro de bloques `if (...)` rompen el parse (escapar como `^(` `^)`); `timeout` resuelto a la utilidad de Git Bash en entornos raros (usar `%SystemRoot%\System32\timeout.exe` con fallback `ping -n`).
+- **Calibración semi-automática** (`sugerir_puntos_calibracion` en `src/digitizer.py`, botón en `src/app.py`): dos niveles — (1) OCR de etiquetas del margen (par monótono más separado, ≥30 px, pendiente negativa); (2) si no, detección de líneas de grilla (`_detectar_lineas_grilla`: mediana de oscuridad por fila, la curva se filtra sola porque toca pocas columnas; picos con `find_peaks`, umbral de contraste en **p99 y no p90** — la grilla puede ocupar <10% de las filas y el p90 da contraste cero, bug encontrado en test sintético) y se asignan los valores por defecto del panel (FCF 210/30, UA según panel) a primera/última línea. La sugerencia queda cacheada por imagen en `session_state`. **La confirmación humana sigue siendo obligatoria** (decisión consciente del 11-ago: el error de escala contamina toda la señal; el botón solo pre-rellena, el usuario verifica los dos números).
+- Verificación: test sintético de grilla (detecta, asigna defaults, sin grilla → None), AppTest de `src/app.py` con 0 excepciones, arranque real HTTP 200, `pytest` 25/25 verde. No probado: el flujo del botón en navegador real con imagen de papel (validar en el próximo uso con un CTG escaneado).
+- Pendiente de siempre: empaquetado tipo instalador .exe (PyInstaller/innosetup) si se quiere distribuir sin Python instalado.
 
 ---
 

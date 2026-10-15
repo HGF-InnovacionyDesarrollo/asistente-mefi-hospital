@@ -22,6 +22,7 @@ from digitizer import (
     digitalizar_con_calibracion,
     extraer_metadatos_cabecera,
     preparar_imagen,
+    sugerir_puntos_calibracion,
 )
 
 load_dotenv()
@@ -231,14 +232,41 @@ def _selector_zoom(prep):
     return x0, x0 + ANCHO_ZOOM_PX
 
 
+def _aplicar_sugerencia(key_prefix, sugerencia):
+    """Callback del botón de detección automática: se ejecuta ANTES de que la
+    página se vuelva a dibujar, así los number_input toman los valores sugeridos."""
+    (y1, v1), (y2, v2) = sugerencia
+    st.session_state[f"{key_prefix}_clics"] = [y1, y2]
+    st.session_state[f"{key_prefix}_v1"] = v1
+    st.session_state[f"{key_prefix}_v2"] = v2
+
+
 def _widget_calibracion(prep, panel, nombre, valor_default_1, valor_default_2, key_prefix, x0, x1):
     """Muestra el panel recortado (en la ventana de zoom x0:x1), captura hasta 2 clics
     (streamlit_image_coordinates) y dos number_input con el valor clínico real de cada punto.
-    Devuelve CalibracionEje o None."""
-    st.markdown(f"**Calibración eje {nombre}** — hacé clic en dos líneas de grilla de valor conocido.")
+    Devuelve CalibracionEje o None.
+
+    Versión semi-automática (oct 2026): un botón pre-rellena los dos puntos y sus
+    valores (OCR de etiquetas del papel, o detección de líneas de grilla con valores
+    por defecto). El usuario SIEMPRE verifica los valores antes de digitalizar —
+    la confirmación humana de la escala sigue siendo obligatoria por decisión de
+    diseño del 11-ago-2026."""
+    st.markdown(f"**Calibración eje {nombre}** — hacé clic en dos líneas de grilla de valor conocido, "
+                "o usá la detección automática y verificá los valores.")
     clics_key = f"{key_prefix}_clics"
     if clics_key not in st.session_state:
         st.session_state[clics_key] = []
+    for k, v in ((f"{key_prefix}_v1", valor_default_1), (f"{key_prefix}_v2", valor_default_2)):
+        if k not in st.session_state:
+            st.session_state[k] = v
+
+    # Sugerencia: se calcula una sola vez por imagen/panel (la imagen completa, no
+    # la ventana de zoom, así los puntos valen para cualquier franja que se muestre).
+    sugerencia_key = f"{key_prefix}_sugerencia"
+    if sugerencia_key not in st.session_state:
+        valores_default = (valor_default_1, valor_default_2)
+        st.session_state[sugerencia_key] = sugerir_puntos_calibracion(prep.gris, panel, valores_default)
+    sugerencia = st.session_state[sugerencia_key]
 
     mostrado, escala = _panel_recortado(prep, panel, x0, x1)
     coords = streamlit_image_coordinates(mostrado, key=f"{key_prefix}_img_{x0}")
@@ -253,12 +281,21 @@ def _widget_calibracion(prep, panel, nombre, valor_default_1, valor_default_2, k
 
     clics = st.session_state[clics_key]
     col1, col2, col3 = st.columns(3)
-    valor1 = col1.number_input(f"Valor punto 1 ({nombre})", value=valor_default_1, key=f"{key_prefix}_v1")
-    valor2 = col2.number_input(f"Valor punto 2 ({nombre})", value=valor_default_2, key=f"{key_prefix}_v2")
+    valor1 = col1.number_input(f"Valor punto 1 ({nombre})", key=f"{key_prefix}_v1")
+    valor2 = col2.number_input(f"Valor punto 2 ({nombre})", key=f"{key_prefix}_v2")
     col3.metric("Puntos marcados", f"{len(clics)}/2")
     if col3.button("Reiniciar puntos", key=f"{key_prefix}_reset"):
         st.session_state[clics_key] = []
         st.rerun()
+
+    if sugerencia is not None:
+        if st.button("✨ Detección automática: marcar los 2 puntos por mí", key=f"{key_prefix}_auto"):
+            _aplicar_sugerencia(key_prefix, sugerencia)
+            st.rerun()
+        st.caption("Después de usarla, **verificá** que los valores coincidan con las líneas marcadas "
+                   "(si vienen de OCR, ya son los del papel; si vienen de grilla, son los valores por defecto).")
+    else:
+        st.caption("Detección automática no disponible en esta imagen — calibrá con 2 clics manualmente.")
 
     if len(clics) == 2:
         return calibrar_desde_dos_puntos(clics[0], valor1, clics[1], valor2, panel)
@@ -297,8 +334,11 @@ if archivo_subido is not None:
         # se pueda reintentar (y se vea el error real) en vez de quedar en un estado roto.
         if st.session_state.get("archivo_actual") != archivo_subido.name:
             st.session_state.pop("prep", None)
-            st.session_state.fcf_clics = []
-            st.session_state.ua_clics = []
+            for _p in ("fcf", "ua"):
+                st.session_state[f"{_p}_clics"] = []
+                st.session_state.pop(f"{_p}_sugerencia", None)
+                st.session_state.pop(f"{_p}_v1", None)
+                st.session_state.pop(f"{_p}_v2", None)
             st.session_state.pop("resultado_digitalizacion", None)
             try:
                 with st.spinner("Orientando imagen y detectando paneles FCF/UA..."):
