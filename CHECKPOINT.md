@@ -1,155 +1,106 @@
 # CHECKPOINT: Asesor Clínico MEFI
 
-**Fecha última actualización:** 15 de octubre de 2026
-**Estado:** Rediseño de arquitectura en curso — **Fase 4 de 6 completa**, disclaimer clínico (Fase 5, parte 1) ya en la UI. `src/digitizer.py` (Fase 1), `src/clinical.py` + `tests/test_clinical.py` (Fase 2), `src/prompts.py` + informe por texto (Fase 3), y validación CTU-UHB (Fase 4) todos funcionales.
+**Fecha última actualización:** 16 de octubre de 2026  
+**Estado general:** Fases 1-4 completas y verificadas; Fase 5 (disclaimer clínico) visible en UI. Pendiente declarado: empaquetado instalable para otros computadores del hospital.
 
-**Extra (fuera del plan de 6 fases, a pedido del usuario):** proveedor LLM ahora 100% configurable por datos — `config.yaml` + `src/llm_client.py` generalizados (label, api_key_env por proveedor), agregado Hugging Face Router como tercera opción junto a OpenRouter/Ollama, y la sidebar de `src/app.py` permite elegir proveedor/modelo/API key y guardarlos como predeterminados sin tocar archivos a mano. Pendiente: empaquetado instalable para otros computadores del hospital (no iniciado).
+**Validación actual (CTU-UHB, 552 registros):** sensibilidad 95.0 % / especificidad 11.1 % / PPV 7.7 % / NPV 96.6 % / exactitud balanceada 53.1 %. AUROC área-desaceleraciones 0.710. La especificidad baja es una propiedad conocida del problema, no un bug del implementación (ver [ESTADO_DELARTE_2026.md](ESTADO_DELARTE_2026.md)).
 
-> El plan completo y detallado (con el porqué de cada decisión) vive en `C:\Users\usuariohgf\.claude\plans\composed-sniffing-moler.md`. Este checkpoint es el resumen ejecutivo para retomar el trabajo directamente en VS Code.
-
----
-
-## -3. Calibración semi-automática + lanzador MEFI.bat (15 oct 2026)
-
-Pedido del usuario (asesor de innovación, no programador): (1) instalación automática de doble clic, (2) calibración semi-automática que quite los clics manuales de la calibración de ejes.
-
-- **`MEFI.bat` (raíz del repo):** doble clic → detecta Python (`py -3` o `python`, vía `where ... &&` — NO `%errorlevel%` dentro de bloques, se expande antes de ejecutar y queda con valor viejo; aprendizaje del bug del 15-oct) → crea `venv` si falta → `pip install -r requirements.txt` solo si falta el marcador `venv\.listo` (venv/ ya está gitignored, el marcador no contamina git) → avisa si falta Tesseract con el comando winget (NO se instala solo, requiere admin) → abre el navegador en :8501 → lanza streamlit. Probado de punta a punta dos veces: primera corrida completa (instala) y corrida subsiguiente (omite, ~16 s hasta HTTP 200). Gotchas batch corregidos: paréntesis sin escapar en `echo` dentro de bloques `if (...)` rompen el parse (escapar como `^(` `^)`); `timeout` resuelto a la utilidad de Git Bash en entornos raros (usar `%SystemRoot%\System32\timeout.exe` con fallback `ping -n`).
-- **Calibración semi-automática** (`sugerir_puntos_calibracion` en `src/digitizer.py`, botón en `src/app.py`): dos niveles — (1) OCR de etiquetas del margen (par monótono más separado, ≥30 px, pendiente negativa); (2) si no, detección de líneas de grilla (`_detectar_lineas_grilla`: mediana de oscuridad por fila, la curva se filtra sola porque toca pocas columnas; picos con `find_peaks`, umbral de contraste en **p99 y no p90** — la grilla puede ocupar <10% de las filas y el p90 da contraste cero, bug encontrado en test sintético) y se asignan los valores por defecto del panel (FCF 210/30, UA según panel) a primera/última línea. La sugerencia queda cacheada por imagen en `session_state`. **La confirmación humana sigue siendo obligatoria** (decisión consciente del 11-ago: el error de escala contamina toda la señal; el botón solo pre-rellena, el usuario verifica los dos números).
-- Verificación: test sintético de grilla (detecta, asigna defaults, sin grilla → None), AppTest de `src/app.py` con 0 excepciones, arranque real HTTP 200, `pytest` 25/25 verde. No probado: el flujo del botón en navegador real con imagen de papel (validar en el próximo uso con un CTG escaneado).
-- Pendiente de siempre: empaquetado tipo instalador .exe (PyInstaller/innosetup) si se quiere distribuir sin Python instalado.
-- Acceso directo en el escritorio: `scripts/crear_acceso_directo.ps1` crea el `.lnk` ("MEFI - Asesor Clinico") apuntando a `MEFI.bat`; útil para replicar en otras máquinas del hospital (ejecutar con `powershell -ExecutionPolicy Bypass -File`).
+**Nota:** el plan técnico original en `C:\Users\usuariohgf\.claude\plans\composed-sniffing-moler.md` ya no existe; este checkpoint y [CLAUDE.md](CLAUDE.md) son hoy las fuentes de decisión del proyecto.
 
 ---
 
-## -2. Deep research + detector de contracciones v2 + métricas ampliadas (13 oct 2026)
+## Historial de decisiones clave
 
-Sesión de revisión profunda del proyecto con investigación de estado del arte completa (resultado: [ESTADO_DELARTE_2026.md](ESTADO_DELARTE_2026.md), con fuentes y figuras en `docs/`). Hallazgo central: la especificidad baja contra pH < 7.05 **es una propiedad del problema, no del implementación** — techo AUC 0.68-0.75 sobre CTU-UHB para todo método publicado (reglas, ML y DL multicéntrico), FIGO computarizado publicado opera a 95%/21.8% y expertos humanos a ~45%/67%. Se trabajó dentro de la regla de oro (jamás bajar sensibilidad para ganar especificidad).
+### Calibración semi-automática + lanzador MEFI.bat (15 oct 2026)
 
-- **Análisis de errores** (`scripts/analizar_falsos_positivos.py`): de los 449 FP, 405 los disparan desaceleraciones repetitivas (proxy 3+/20 min) y 410 desaceleraciones no repetitivas — las desaceleraciones dominan todo; variabilidad anómala solo 49, línea base 18, muy prolongada 37. Los 2 FN también tenían repetitivas.
-- **Detector de contracciones v2** (`clinical.detectar_contracciones`, reemplaza la lógica de `_picos_contraccion` que queda como alias): pipeline clásico TOCO de la literatura — remuestreo uniforme, mediana 7s, pasabajos Butterworth zero-phase 0.04 Hz (anti-respiración), tono basal por mediana móvil 5 min, `find_peaks` con prominencia = máx(15% del rango robusto p95-p20, 4σ del ruido estimado en el tramo inferior p40 — el MAD global quedaba inflado por las propias contracciones con duty cycle alto, bug del primer intento, piso absoluto 3), distancia mínima 45s, anchura mínima 30s al 50% de prominencia. Sobre CTU-UHB: mediana 11-17 contracciones/registro (~1.5-2.4/10 min, p5-p95 3-26) frente a las **90 (12.6/10 min) del detector naive** — esa era la causa raíz del fracaso del 26-ago. Umbrales relativos → sirve para UA en % (CTU-UHB) y mmHg (digitalizador).
-- **Criterio NICE de tachisistolia** (≥5 contracciones/10 min, NICE NG229 §1.4.12) incorporado como 4ª variable del semáforo y razón de Categoría II aditiva (sube sensibilidad, nunca la baja). En CTU-UHB afectó 0 registros; en monitores reales con hiperstimulación sí disparará.
-- **Área bajo desaceleraciones** (`features["area_desaceleraciones_lpm_s"]`): severidad cuantitativa expuesta en UI y prompt (NO entra en la clasificación). Es la feature individual con mejor AUROC propia (0.710) y coincide con la feature principal publicada (DeepCTG `dec_area`).
-- **Criterio FIGO real (>50% contracciones) re-evaluado con detector v2 y confirmado NO adoptable**: especificidad sube a 64.3% pero sensibilidad cae a 67.5% (FN 2→13). Viola la regla de oro. Queda medido en `scripts/prototipo_contracciones.py`.
-- **Validación ampliada** (`scripts/validar_ctu_uhb.py --all`): ahora reporta PPV/NPV/exactitud balanceada y AUROC por feature continua. Resultados finales del batch de 552: **sens 95.0% / spec 11.1%** (VN 57, FP 455, FN 2 — ver nota abajo), PPV 7.7% (≈ prevalencia 7.2%, como en la literatura), NPV 96.6%, área-desaceleraciones AUC 0.710.
-- **Nota honesta sobre el antes/después**: la especificidad bajó de 12.3% a 11.1% (6 registros VN→FP). Sensibilidad sin cambios (95%, FN=2). Causa: con picos de UA reales, muchas desaceleraciones dejan de correlacionar con un "pico" espurio y pasan de `precoz` (benigna) a `variable`/`indeterminada` (contabilizada) — el 12.3% previo estaba parcialmente inflado por subclasificación errada del detector viejo. La divergencia está documentada y es mecánicamente explicable; revertir `_picos_contraccion` al algoritmo viejo recuperaría el 12.3% pero con conteos fisiológicamente imposibles. Decisión: quedarse con el detector correcto.
-- `pytest`: 25/25 verde (6 tests nuevos: conteo correcto, anti-ruido, anti-respiración, frecuencia en features, tachisistolia→Categoría II, área en features).
-- Pendiente anotado desde el estado del arte: divergencia deliberada con NICE 2025 (desaceleración prolongada única: NICE marca "rojo" a ≥3 min; el MVP conserva ≥5 min como criterio patológico directo) — revisar con validación clínica; score continuo tipo DeepCTG como propuesta futura; canal de FC materna si el hardware lo permite.
+- **`MEFI.bat` (raíz):** doble clic → detecta Python, crea `venv` si falta, instala dependencias la primera vez (marcador `venv\.listo`), verifica Tesseract, abre navegador en `:8501` y lanza Streamlit. Probado de punta a punta.
+- **`src/digitizer.py::sugerir_puntos_calibracion`:** pre-rellena los dos puntos de calibración por OCR de etiquetas del margen o detección de líneas de grilla. La confirmación humana sigue siendo obligatoria.
+- `pytest` 25/25 verde.
 
----
+### Detector de contracciones v2 + métricas ampliadas (13 oct 2026)
 
-## -1. Intento de mejorar especificidad del clasificador FIGO (26 ago 2026)
+- Reemplazó el detector naive de UA por un pipeline clásico TOCO (pasabajos 0.04 Hz, tono basal móvil, `find_peaks` con umbrales relativos). Mediana 11-17 contracciones/registro (~2/10 min) frente a las 90 imposibles del detector anterior.
+- Criterio NICE de tachisistolia (≥5 contracciones/10 min) como 4ª variable del semáforo.
+- Área bajo desaceleraciones como severidad cuantitativa en UI y prompt (AUC 0.710).
+- Validación batch reporta PPV/NPV/exactitud balanceada y AUROC por feature.
 
-Sesión enfocada en el hallazgo de Fase 4: especificidad de 10.9-12.5% (muchos falsos positivos) contra los 552 registros CTU-UHB, con sensibilidad 95%. Análisis de qué criterio disparaba cada falso positivo (script puntual, no commiteado):
+### Robustecimiento CTU-UHB + disclaimer (18 ago 2026)
 
-- **"Variabilidad aumentada" era el driver #1** (126 de 456 falsos positivos): `calcular_variabilidad()` promediaba la amplitud pico-a-pico de todas las ventanas de 1 min, así que unas pocas ventanas ruidosas (dropout de sensor no filtrado del todo) inflaban el promedio de todo el registro. **Fix aplicado y conservado:** usar la mediana en vez del promedio (`src/clinical.py::calcular_variabilidad`) — más robusta a outliers puntuales, refleja el patrón predominante. Especificidad subió de 10.9% a 12.3-12.5%, sensibilidad sin cambios (95%). `tests/test_clinical.py` sigue en verde sin cambios.
-- **"3+ desaceleraciones tardías/variables en 20 min" (proxy de "repetitivas") era el driver dominante del resto:** casi universal en trabajo de parto real. **Se intentó reemplazar por la definición real de FIGO 2015** (desaceleraciones asociadas a >50% de las contracciones reales, usando los picos de UA ya detectados por `_picos_contraccion()`). Requirió: (a) fix de un bug real en `_picos_contraccion()` — mesetas planas en el pico de UA se contaban como 2+ picos separados en vez de 1 (fusión de picos a <30s agregada, se conserva); (b) nuevo campo `pico_ua_asociado_s` por desaceleración y `features["num_contracciones"]` (ambos se conservan, calculados pero sin usar en la clasificación — diagnóstico disponible a futuro). **Resultado: especificidad subió a 78.9%, pero la sensibilidad cayó de 95% a 67.5% (falsos negativos de 2 a 13)** — el detector de picos de UA no es lo bastante confiable sobre señal real/ruidosa para usarlo como criterio excluyente. **Se descartó y revirtió** ese reemplazo: para una herramienta de apoyo a decisión clínica, perder casos reales de hipoxia es mucho peor que sobre-alertar. El proxy por conteo (3+ en 20 min) se mantiene tal cual estaba.
-- **Conclusión:** la especificidad baja (~12%) sigue siendo, en su mayor parte, una limitación real de un clasificador basado en reglas simplificadas sin una detección de contracciones confiable — consistente con la literatura (alta sensibilidad / baja especificidad es un patrón recurrente en CTG, el mismo punto del ensayo INFANT ya citado en el disclaimer). Mejorarla de verdad requeriría una detección de contracciones más robusta que el detector de picos actual (ej. sobre datos reales con tocodinamómetro externo ruidoso), o correlación más fina de "atípica" en variables — trabajo de sesión dedicada, no algo que rendir seguro con más ajustes de umbral sobre este mismo detector de UA.
-- `pytest`: 19/19 verde. Batch de 552 registros re-corrido y verificado en cada paso (`scripts/validar_ctu_uhb.py --all`).
+- Descarga del dataset completo con `scripts/descargar_ctu_uhb.py`.
+- Fix del parser de metadata CTU-UHB (espacios múltiples, no `:`).
+- Filtrado de dropouts del sensor Doppler (FCF=0 fuera de 50-220 lpm).
+- Fix del criterio de Categoría I: ahora exige "sin desaceleraciones repetitivas" (proxy 3+ en 20 min), no cero desaceleraciones.
+- Disclaimer clínico agregado en `src/app.py` con referencia al ensayo INFANT.
 
----
+### Seguridad y redacción de casos (11 ago 2026)
 
-## 0. Robustecimiento CTU-UHB + disciplina de datos (18 ago 2026, sesión aparte de las 6 fases)
-
-Bloque de trabajo nuevo, fuera de la numeración de fases 1-6, ejecutado según plan en `C:\Users\usuariohgf\.claude\plans\lucky-skipping-patterson.md`:
-
-- **Remediación PHI en git history:** se encontraron 2 archivos ya commiteados en `data/` con nombres completos de pacientes en el filename (contenido solo numérico, pero el nombre del archivo es PHI). Como era el commit tope (HEAD) sin hijos y sin nada publicado al remote (`origin` vacío, confirmado con `git ls-remote`), se remedió con `git reset --soft` al commit padre + renombrado + recommit, en vez de `git filter-repo`. Verificado con `git rev-list --objects --all | git cat-file --batch-check` que no queda ningún blob con el nombre del paciente.
-- **Nomenclatura y carpetas de datos:** `data/README.md` documenta el estándar `YYYY-MM-DD_IDPaciente_HoraInicio`. Nuevas carpetas `data/raw_scans/`, `data/processed_scans/` (gitignored) y `data/extracted/` (CSVs de series de tiempo ya digitalizadas — reemplaza el patrón viejo de `data/*_extraido.csv` sueltos en la raíz).
-- **CTU-UHB a escala:**
-  - `scripts/descargar_ctu_uhb.py` (nuevo): descarga N registros o el dataset completo (552) vía `wfdb.dl_database()` a `data/ctu_uhb/` (gitignored).
-  - **Bug encontrado y corregido** en `scripts/validar_ctu_uhb.py::cargar_registro_ctu_uhb()`: el parser de metadata buscaba `":"` en los comentarios del `.hea`, pero el formato real de CTU-UHB es `#pH           7.14` (espacios múltiples, sin `:`) — nunca capturaba pH/Apgar/BDecf. Corregido con `re.split(r"\s{2,}", ...)`. Verificado contra el registro 1001: ahora sí aparecen `pH: 7.14`, `Apgar1: 6`, `Apgar5: 8`.
-  - `scripts/validar_ctu_uhb.py` gana modo batch (`--all`): valida todos los registros descargados y reporta sensibilidad/especificidad de "FIGO II/III" vs. "pH < 7.05" (matriz de confusión).
-  - `scripts/create_csv_database.py` (nuevo, pedido explícito del usuario): genera `data/extracted/ctu_uhb/{record_id}.csv` (una serie de tiempo por registro, formato espejo) + `data/extracted/ctu_uhb_outcomes.csv` (una fila por registro con pH/Apgar/BDecf/etc., separado de las series). Ambos gitignored (datos derivados, pueden pesar).
-- **Metadatos de cabecera y anotaciones clínicas en `src/digitizer.py`** (nuevo, best-effort igual que la calibración OCR ya existente), **conectadas a la UI de `src/app.py`**:
-  - `extraer_metadatos_cabecera(imagen_bytes)`: OCR sobre la franja superior del papel — intenta capturar ID, FHR impreso, fecha/hora, velocidad de papel. 100% local, nunca se envía a un proveedor LLM. Probado sobre los PNG ya redactados en `fixtures/casos_redactados/`: no reintroduce PHI (los campos estructurados salen `None` cuando el dato está tapado; en un caso el OCR alcanzó a leer un fragmento de ID numérico desde `texto_crudo` porque la redacción de ese campo específico no fue 100% — riesgo ya documentado del pipeline de redacción, no algo nuevo que introduzca esta función).
-  - `detectar_anotaciones_clinicas(prep)`: OCR + keyword-spotting (peridural, oxitocina, meconio, etc.) en la franja debajo del panel UA, donde suelen ir anotaciones a mano. No clasifica impacto clínico, solo lo reporta como advertencia de texto para que el clínico lo confirme y para que `prompts.py` lo use como contexto.
-  - En `src/app.py`: al preparar una imagen nueva se corren ambas funciones; los metadatos salen en un expander editable (el clínico corrige antes de confiar) y las anotaciones como `st.info` junto a las demás advertencias.
-- **Disclaimer clínico (Fase 5, parte 1) agregado en `src/app.py`**: banner fijo bajo el título — ayuda diagnóstica no diagnóstico, referencia al ensayo INFANT (Lancet 2017), simplificación de MVP no validada en la población del Hospital Gustavo Fricke. Gobernanza de datos con OpenRouter sigue pendiente aparte.
-- **Validación completa sobre los 552 registros de CTU-UHB — encontró y corrigió 2 problemas reales en la lógica clínica, no solo en el pipeline de datos:**
-  1. **Dropouts del sensor Doppler sin filtrar** (`scripts/validar_ctu_uhb.py::convertir_a_dataframe`): CTU-UHB marca pérdida de contacto con FCF=0 (no NaN) — ~22% de las muestras en el registro 1001. Sin filtrarlas, un 0 dentro de una ventana de 1 minuto arruina el cálculo de variabilidad (máximo-mínimo) en `clinical.py`. Fix: `fcf_confiable = False` para valores fuera de 50-220 lpm (`FCF_MIN_FISIOLOGICO`/`FCF_MAX_FISIOLOGICO`), igual que `digitizer.py` ya hace con sus propios tramos dudosos.
-  2. **Criterio de Categoría I demasiado estricto en `clinical.py::clasificar_figo()`**: exigía cero desaceleraciones tardías/variables, cuando FIGO 2015 en realidad exige que no sean *repetitivas* (>50% de las contracciones). Nuevo helper `_hay_desaceleraciones_repetitivas()` (proxy: 3+ en una ventana de 20 min) — una o dos aisladas ya no descalifican de Normal. `tests/test_clinical.py` actualizado: el test viejo que asumía "1 desaceleración tardía → Categoría II" se reemplazó por dos tests (aislada → I, repetitivas → II).
-  - **Resultado del batch de 552 registros, antes/después de ambos fixes** (sensibilidad/especificidad de "FIGO II/III" vs. "pH de cordón < 7.05"):
-    | | Antes (bug dropout) | + fix dropout | + fix repetitivas |
-    |---|---|---|---|
-    | Categoría I | 0/552 | 16/552 | 59/552 |
-    | Sensibilidad | 100% | 100% | 95% |
-    | Especificidad | 0% | 3.1% | 11.1% |
-  - 11.1% de especificidad sigue siendo bajo, pero a partir de acá ya no es un bug de datos — es la limitación real y conocida de un clasificador basado en reglas simplificadas (consistente con la literatura: alta sensibilidad / baja especificidad es un patrón recurrente en sistemas de apoyo a CTG, el mismo punto de fondo del ensayo INFANT ya citado en el disclaimer). Mejorarlo más allá de esto requeriría lógica más fina en `clinical.py` (correlación real con contracciones, criterios de "atípica" en variables) — trabajo de una sesión dedicada, no seguido a ciegas acá.
-- `pytest`: 19/19 verde.
+- API key filtrada rotada; historial de git reescrito a commit limpio antes de cualquier push.
+- Casos reales redactados a `fixtures/casos_redactados/` con `scripts/redactar_casos.py`.
+- `.gitignore` reescrito en UTF-8; carpetas de datos excluidas.
 
 ---
 
-## 1. Qué se hizo en esta sesión (11 ago 2026)
+## Arquitectura actual
 
-### 1.1 Seguridad — cerrado
-- Se encontró una API key real de OpenRouter hardcodeada en `test_conexion.py` y `.streamlit/secrets.toml`, ambas ya trackeadas en git.
-- `.gitignore` estaba corrupto (guardado en UTF-16 por un bug del entorno), por eso no excluía `secrets.toml` de verdad — reescrito en UTF-8 plano.
-- Historial de git reescrito a un solo commit limpio (`b626889`) antes de cualquier `push` (el remoto `origin` seguía vacío) — verificado objeto por objeto que la key vieja no existe en ningún blob del repo.
-- Key rotada en el dashboard de OpenRouter. La key vigente vive solo en `.env` y `.streamlit/secrets.toml` (ambos gitignored), nunca en código. `test_conexion.py` ahora la lee vía `python-dotenv`.
+```
+[Imagen/PDF/CSV] → src/digitizer.py → DataFrame → src/clinical.py → features FIGO/NICE
+                                                            ↓
+                                                    src/prompts.py → texto
+                                                            ↓
+                                              src/llm_client.py + config.yaml → LLM
+                                                            ↓
+                                                    src/app.py → informe + UI
+```
 
-### 1.2 Investigación de estado del arte — cerrada
-Investigación profunda (dos agentes en paralelo) sobre IA aplicada a interpretación de CTG/EFM fetal: guías clínicas vigentes (FIGO 2015, NICE NG229, ACOG, consenso fisiológico internacional 2018/rev. 2024), sistemas comerciales (STAN, PeriGen PeriWatch, K2 INFANT-Guardian...), el ensayo INFANT (Lancet 2017) como caso de precaución (precisión de clasificación ≠ beneficio clínico demostrado), el dataset abierto CTU-UHB (PhysioNet), y evidencia de que **ningún modelo de visión genérico (Qwen-VL, GPT-4V, Gemini, Claude) es confiable leyendo coordenadas numéricas exactas desde una imagen de gráfico** — la razón técnica detrás del rediseño de arquitectura de este plan.
-
-Publicada como artifact: `https://claude.ai/code/artifact/1e09035f-ced7-44c3-bdcd-6fd5a7b3ea06`
-
-### 1.3 Plan de trabajo — aprobado
-Plan de 6 fases guardado en `C:\Users\usuariohgf\.claude\plans\composed-sniffing-moler.md`. Decisiones ya tomadas (no volver a discutirlas, solo ejecutar):
-
-- **Arquitectura:** separar la digitalización de la imagen (determinística, auditable) de la interpretación clínica (LLM) — hoy `analizar_imagen_mefi()` en `src/app.py` hace ambas cosas en una sola llamada.
-- **Calibración del digitalizador:** OCR con Tesseract desde la Fase 1 (no diferido), con calibración manual/2-clics como *fallback* si el OCR no da confianza suficiente.
-- **Alcance del digitalizador:** FCF **+ UA** (actividad uterina) desde el inicio, para poder subclasificar desaceleraciones (precoz/tardía/variable) según FIGO/NICE.
-- **Tests:** `pytest` solo para `src/clinical.py` (lógica de clasificación de riesgo fetal). El resto del repo sigue con scripts ad-hoc.
-- **Proveedor LLM:** **OpenRouter como principal**, Ollama local como opción 2 en el mismo selector de la sidebar. **Pendiente sin resolver:** acuerdo de tratamiento de datos con OpenRouter/Google/Anthropic para datos reales de pacientes — hasta confirmarlo, ningún dato de paciente real (ni redactado) debe enviarse a OpenRouter, solo usarse localmente.
-
-### 1.4 Implementación — Fase 0 en curso
-- **Tesseract-OCR 5.4.0 instalado** vía `winget` (sin admin) en `C:\Users\usuariohgf\AppData\Local\Programs\Tesseract-OCR\tesseract.exe`. **No quedó en el PATH del sistema** — cualquier código que use `pytesseract` debe fijar `pytesseract.pytesseract.tesseract_cmd` a esa ruta explícitamente (ver patrón ya usado en `scripts/redactar_casos.py`).
-- El usuario compartió **19 casos reales** en `C:\Users\usuariohgf\Desktop\Casos\` (18 PDF + 1 JPEG). Confirmado visualmente que **no están de-identificados**: tienen `ID:` y `Nombre:` de paciente visibles, repetidos en cada segmento de página. El hospital está adquiriendo además un escáner para mejorar la resolución de estas capturas a futuro.
-- **Decisión del usuario:** redactar (tapar) `ID`/`Nombre`/`RUT`/`Paciente` en cada archivo antes de usarlo para cualquier cosa, incluso pruebas 100% locales.
-- Construido `scripts/redactar_casos.py`:
-  - Para PDFs con texto nativo: borra de verdad el texto (no solo lo tapa visualmente) vía `page.add_redact_annot()` + `page.apply_redactions()` de PyMuPDF.
-  - Además corre una pasada de OCR en 4 rotaciones (0°/90°/180°/270°, las fotos vienen apaisadas) sobre la página rasterizada, para tapar cualquier ID/Nombre que venga como imagen/foto y no como texto nativo. Combina las 4 detecciones tomando el mínimo por píxel.
-  - Salida: un PNG por página en `fixtures/casos_redactados/` (**gitignored** — agregado a `.gitignore` junto con `data/ctu_uhb/`, que se usará en la Fase 4).
-- Corrida lanzada en background esta sesión; al momento de este checkpoint iba en ~47 páginas procesadas (de ~50 esperadas). **Revisar el estado real al retomar** (`ls fixtures/casos_redactados` — debería haber terminado).
-
-**Pendiente crítico e inmediato:** revisar visualmente **cada** PNG en `fixtures/casos_redactados/` y confirmar que ningún ID/Nombre/RUT queda legible antes de usarlos para calibrar nada. La redacción automática es *best-effort*, no está garantizada al 100% (confirmado: en al menos un archivo de prueba la redacción falló completamente en la primera pasada y quedó parcial en la segunda — ver 1.5). Si algún archivo queda con datos visibles, ajustar `KEYWORDS`/`PAD` en `scripts/redactar_casos.py` y volver a correrlo solo para ese archivo.
-
-### 1.5 Implementación — Fase 1 (`src/digitizer.py`) — funcional, con una decisión de diseño importante
-
-Construido `src/digitizer.py` con la arquitectura de dos pasos (`preparar_imagen()` → `digitalizar_con_calibracion()`) e integrado en `src/app.py`. Piezas:
-
-- **Orientación automática:** prueba las 4 rotaciones de 90°, descarta las que no separan dos paneles horizontales, y desempata entre las que sí (ej. imagen correcta vs. al revés) con `pytesseract.image_to_osd` — su confianza absoluta es baja en estas fotos ruidosas, pero el "Rotate" sugerido (0 vs 180) resultó ser una señal confiable en la práctica.
-- **Detección automática de paneles FCF/UA:** ubica el papel por contraste de brillo contra el fondo (señal fuerte y confiable), y separa FCF de UA buscando el hueco entre ambos. **Esta parte NO llegó a ser precisa** — en las pruebas, el "hueco" detectado terminó siendo un mínimo local de tinta dentro de la propia grilla, no el límite real del panel (confirmado midiendo a mano con una regla de píxeles sobre la imagen). En vez de seguir puliendo esa heurística, se le da **margen generoso** a cada panel (no corta la grilla real) y se acepta que el límite automático es aproximado.
-- **Extracción de curva:** color + seguimiento por continuidad, con desempate por grosor de trazo (para no "engancharse" en bloques de texto/tinta más gruesos que la línea real) y detección de outliers contra una mediana móvil local. Huecos causados por ID/Nombre/fecha a mano/dobleces se interpolan y quedan registrados en `advertencias` con su rango de tiempo. **Validado visualmente contra 2 casos reales distintos** — sigue el trazo real con alta fidelidad.
-- **Calibración del eje Y — decisión final: 2 clics manuales, no OCR.** Se intentó que `pytesseract` leyera las etiquetas numéricas del eje (`_calibrar_eje_ocr`, sigue en el código como intento automático de mejor esfuerzo) pero resultó **poco confiable de forma consistente** en estas fotos/escaneos reales (texto de impresora térmica, chico, sobre grilla). El usuario decidió priorizar calibración manual: en `src/app.py`, `_widget_calibracion()` muestra el panel recortado vía `streamlit_image_coordinates`, el clínico hace clic en 2 líneas de grilla de valor conocido, y `calibrar_desde_dos_puntos()` arma la calibración lineal desde esos 2 puntos reales (confianza 1.0, no estimada). **Esto no se probó interactivamente en el navegador** (el tooling de este sesión no pudo simular clics en el uploader de Streamlit) — si algo falla en el flujo de clics real, es lo primero a revisar.
-- Verificado end-to-end con puntos de calibración medidos a mano sobre `MEFI.pdf`: línea base ≈112 lpm, rango 84-146, 88% de cobertura confiable — coherente con una lectura visual del trazado.
-
-**Dependencias nuevas:** `scipy` (ya era transitiva vía scikit-learn, ahora explícita), `streamlit-image-coordinates` (clics sobre imagen), `wfdb` (confirmado compatible con Python 3.14.5, para Fase 4) — las tres ya en `requirements.txt`.
+Ningún LLM ve la imagen ni la señal cruda: el LLM solo redacta sobre el dict de features.
 
 ---
 
-## 2. Plan de trabajo completo (6 fases)
+## Módulos principales
 
-Detalle técnico completo de cada fase en `C:\Users\usuariohgf\.claude\plans\composed-sniffing-moler.md`. Resumen:
-
-- [ ] **Fase 0 (parcial):** redacción de casos reales corrida pero **no verificada visualmente al 100%** (crítico, ver 1.4); falta generar fixtures sintéticas con `matplotlib`; falta limpiar los `data/*_extraido.csv` vacíos.
-- [x] **Fase 1 (funcional, ver 1.5):** `src/digitizer.py` — orientación + detección de paneles automática (aproximada, con margen generoso), calibración por 2 clics manuales (`streamlit-image-coordinates`), extracción de curva con detección de huecos/interpolación auditable, integrado en `src/app.py`. **Sin probar interactivamente en navegador real.**
-- [x] **Fase 2 (completa, 13 ago 2026):** `src/clinical.py` + `tests/test_clinical.py` (pytest, 18 tests, todos en verde) — línea base (mediana iterativa excluyendo acel/decel, redondeada a 5 lpm), variabilidad real (banda de amplitud pico-a-pico por minuto excluyendo eventos con margen, no desviación estándar), aceleraciones (>=15 lpm, 15s-10min), desaceleraciones subclasificadas precoz/tardía/variable/indeterminada correlacionando el nadir contra picos de UA, patrón sinusoidal (FFT en banda 3-5 ciclos/min, amplitud 5-15 lpm, >=10 min sostenidos), `clasificar_figo()` (categorías I/II/III + semáforo NICE NG229 por variable). Punto de entrada único: `extraer_features(df)`. Tolerante a DataFrames sin `fcf_confiable`/`ua` (formato viejo de `data/sample.csv`, pre-digitizer). **Nota:** es una simplificación de MVP — no cubre cada matiz de FIGO/NICE (ver disclaimer pendiente de Fase 5); la validación real contra outcome (pH de cordón, CTU-UHB) es la Fase 4, todavía pendiente.
-- [x] **Fase 3 (completa, 13 ago 2026):** `src/prompts.py` (nuevo) — `SYSTEM_INSTRUCTIONS` con los umbrales FIGO/NICE importados directo de `clinical.py` (nunca se desincronizan) + razonamiento de tipo de hipoxia (precoz/variable/tardía → compresión cabeza/cordón/insuficiencia uteroplacentaria, consenso 2018/rev. 2024) y `construir_prompt_usuario(features)` que renderiza el dict de `clinical.extraer_features()` como texto estructurado. `src/app.py`: `analizar_imagen_mefi()` (mandaba la imagen en base64) reemplazada por `generar_informe_clinico(features, client, modelo)` — el LLM ya NO ve la imagen, solo el texto clasificado; la UI ahora muestra la clasificación FIGO/semáforo NICE antes del botón de informe. `config.yaml` gana `text_models` por proveedor (separado de `vision_models`, que queda documentado pero sin uso activo) y `active_provider: openrouter` por defecto. Verificado: `pytest` (18/18), `streamlit run` levanta sin excepciones, prompt de sistema y de usuario generados correctamente sobre un caso sintético.
-- [x] **Fase 4 (completa, 18 ago 2026):** `wfdb` instalado y confirmado compatible con Python 3.14.5; lectura de un registro real de CTU-UHB (1001) verificada end-to-end con 19,200 muestras en 80 minutos. Script `scripts/validar_ctu_uhb.py` completado: carga .hea/.dat de PhysioNet, convierte a DataFrame uniforme, ejecuta pipeline de `clinical.py`, y reporta clasificación FIGO/NICE. Validación de Registro 1001 completada: Categoría III con variabilidad aumentada y múltiples desaceleraciones. **Documentación:** [VALIDACION_CTU_UHB.md](VALIDACION_CTU_UHB.md) incluye procedimiento de validación, comparación camino manual vs. CTU-UHB, y línea base de correctitud.
-- [ ] **Fase 5:** disclaimer clínico visible en la UI de Streamlit + documentar el precedente INFANT/STAN (precisión ≠ beneficio clínico) en este mismo archivo.
-
-Tareas también están trackeadas en el sistema de tasks de esta sesión (#1 a #6, una por fase).
+| Archivo | Responsabilidad |
+|---|---|
+| `src/digitizer.py` | Imagen → serie de tiempo. Orientación, paneles FCF/UA, calibración semi-automática, extracción de curva, OCR local de cabecera/anotaciones. |
+| `src/clinical.py` | Reglas FIGO 2015 / NICE NG229. Línea base, variabilidad, aceleraciones, desaceleraciones subclasificadas, patrón sinusoidal, clasificación FIGO + semáforo. |
+| `src/prompts.py` | Prompt de sistema (importa umbrales de `clinical.py`) y constructor del prompt de usuario. |
+| `src/llm_client.py` + `config.yaml` | Cliente LLM configurable por datos: Ollama / OpenRouter / Hugging Face Router. |
+| `src/app.py` | UI Streamlit: uploader, calibración, digitalización, clasificación, generación de informe. |
+| `scripts/validar_ctu_uhb.py` | Validación contra CTU-UHB (`--record-id` o `--all`). |
+| `scripts/prueba_llm_local.py` | Prueba de humo con Ollama local (qwen3:4b), compara español directo vs. inglés maestro + traducción. |
+| `MEFI.bat` | Lanzador de doble clic para usuarios no técnicos. |
 
 ---
 
-## 3. Cosas a tener presente al retomar en VS Code
+## Verificación rápida
 
-- Leer `C:\Users\usuariohgf\.claude\plans\composed-sniffing-moler.md` antes de tocar código — tiene el enfoque técnico decidido para cada fase, no solo el resumen.
-- **Nunca commitear** nada de `fixtures/` ni `data/ctu_uhb/` — ya están en `.gitignore`, pero doble-chequear si se agregan archivos nuevos fuera de esas carpetas.
-- El riesgo de privacidad de datos con OpenRouter (imágenes/datos de pacientes reales saliendo del hospital) **sigue sin resolución formal**. No conectar los casos reales (ni redactados) a OpenRouter todavía — solo Ollama local o fixtures sintéticas hasta que se confirme.
-- El `venv` usa Python 3.14.5. `pytesseract` necesita `tesseract_cmd` apuntado manualmente (no quedó en PATH del sistema).
-- Si el entorno se mueve a otra máquina del hospital, Tesseract-OCR se instala sin admin vía `winget install --id UB-Mannheim.TesseractOCR -e`.
+```powershell
+cd "C:\MVP - MEFI"
+.\venv\Scripts\Activate.ps1
 
-## 4. Notas técnicas históricas (pre-11 ago 2026)
-- **Error 400 (Invalid Image Input):** se sospechó que `response_format={"type": "json_object"}` causaba conflictos con modelos de visión; se eliminó.
-- **Error 404:** los IDs de modelos en OpenRouter son sensibles — usar `verificar_modelos.py` o la lista oficial antes de asumir un ID.
-- Estructura previa: `App -> LLM Factory -> Provider` (sigue vigente como base; Fase 1-3 la extienden, no la reemplazan).
+# Tests
+python -m pytest tests/ -q          # 25/25 verde
+
+# Validación CTU-UHB
+PYTHONIOENCODING=utf-8 python scripts/validar_ctu_uhb.py --all
+
+# App
+PYTHONIOENCODING=utf-8 streamlit run src/app.py
+```
+
+---
+
+## Pendientes declarados
+
+1. **Empaquetado instalable** para otros computadores del hospital (PyInstaller/innosetup o similar) — no iniciado.
+2. **Gobernanza de datos con OpenRouter/Hugging Face** para uso con datos reales: hasta confirmar, solo Ollama local o fixtures sintéticas.
+3. **Score continuo de riesgo** tipo DeepCTG como propuesta futura (requiere validación local).
+4. **Canal de frecuencia cardíaca materna** si el hardware lo permite.
+
+---
+
+## Reglas duras
+
+- Nunca commitear `fixtures/`, `data/ctu_uhb/`, `data/raw_scans/`, `data/processed_scans/`, `data/extracted/`, `Casos/`, `src/data/`.
+- Nunca poner nombre/RUT/ID real de paciente en nombres de archivo, mensajes de commit ni código.
+- Antes de cambiar un umbral clínico: correr `pytest` **y** `scripts/validar_ctu_uhb.py --all`, y reportar sensibilidad/especificidad antes/después.
+- No bajar sensibilidad para ganar especificidad con el clasificador por reglas.
