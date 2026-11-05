@@ -1,6 +1,6 @@
 """Redacta campos identificatorios (ID, Nombre, RUT, Paciente) de casos MEFI reales.
 
-Uso: python scripts/redactar_casos.py
+Uso: python scripts/pipeline/redactar_casos.py
 Lee de SRC_DIR (fuera del repo) y escribe imágenes PNG redactadas en fixtures/casos_redactados/.
 No modifica ni sube los originales a ningún lado.
 """

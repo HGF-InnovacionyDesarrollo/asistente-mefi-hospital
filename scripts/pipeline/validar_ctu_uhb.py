@@ -4,7 +4,7 @@ Validación de Fase 4: Carga registros de CTU-UHB (PhysioNet) y valida
 la clasificación FIGO/NICE contra el outcome real (pH de cordón).
 
 Uso:
-    python scripts/validar_ctu_uhb.py  [--record-id 1001] [--verbose]
+    python scripts/pipeline/validar_ctu_uhb.py  [--record-id 1001] [--verbose]
 
 La carpeta data/ctu_uhb/ debe contener archivos .hea y .dat del dataset.
 Se puede descargar un registro así:
@@ -26,7 +26,7 @@ import pandas as pd
 import wfdb
 
 # Importar la lógica clínica
-sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 import clinical
 
 

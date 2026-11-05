@@ -10,8 +10,8 @@ formato tabular reutilizable:
   de tiempo.
 
 Uso:
-    python scripts/create_csv_database.py
-    python scripts/create_csv_database.py --data-dir data/ctu_uhb --out-dir data/extracted/ctu_uhb
+    python scripts/pipeline/create_csv_database.py
+    python scripts/pipeline/create_csv_database.py --data-dir data/ctu_uhb --out-dir data/extracted/ctu_uhb
 """
 
 import argparse

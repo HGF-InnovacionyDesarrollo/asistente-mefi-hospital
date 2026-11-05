@@ -42,7 +42,7 @@ Tu MVP de "Asesor Clínico MEFI" tiene **dos caminos de entrada**:
 
 ## ¿Qué validó tu sistema?
 
-Cuando ejecutaste `scripts/validar_ctu_uhb.py`, el sistema:
+Cuando ejecutaste `scripts/pipeline/validar_ctu_uhb.py`, el sistema:
 
 ### 1. **Cargó los datos de CTU-UHB** ✓
 ```
@@ -98,7 +98,7 @@ FIGO III (Categoría III - Anormal)
 ```bash
 cd "c:\MVP - MEFI"
 .\venv\Scripts\Activate.ps1
-python scripts/validar_ctu_uhb.py --record-id 1001
+python scripts/pipeline/validar_ctu_uhb.py --record-id 1001
 ```
 
 **Output esperado:**
@@ -118,7 +118,7 @@ done
 
 # Validar cada uno
 for i in 1001 1002 1003 1004 1005; do
-    python scripts/validar_ctu_uhb.py --record-id $i --json >> validation_results.json
+    python scripts/pipeline/validar_ctu_uhb.py --record-id $i --json >> validation_results.json
 done
 ```
 
@@ -166,7 +166,7 @@ Una vez que valides que la clasificación FIGO funciona correctamente sobre CTU-
 
 | Archivo | Propósito |
 |---------|---|
-| [scripts/validar_ctu_uhb.py](../scripts/validar_ctu_uhb.py) | Script de validación (Fase 4) |
+| [scripts/pipeline/validar_ctu_uhb.py](../scripts/pipeline/validar_ctu_uhb.py) | Script de validación (Fase 4) |
 | [src/clinical.py](../src/clinical.py) | Lógica de clasificación FIGO/NICE |
 | [src/digitizer.py](../src/digitizer.py) | Digitalización de imágenes de CTG |
 | [data/ctu_uhb/](../data/ctu_uhb/) | Registros reales descargados de PhysioNet |
@@ -188,8 +188,8 @@ Una vez que valides que la clasificación FIGO funciona correctamente sobre CTU-
 ## Addendum: línea de base ampliada (13-oct-2026)
 
 Resultados del batch de 552 registros con el detector de contracciones v2 y las
-métricas nuevas (`scripts/validar_ctu_uhb.py --all`; contexto completo en
-[CHECKPOINT.md](CHECKPOINT.md) §-2 y [ESTADO_DELARTE_2026.md](ESTADO_DELARTE_2026.md)):
+métricas nuevas (`scripts/pipeline/validar_ctu_uhb.py --all`; contexto completo en
+[CHECKPOINT.md](../CHECKPOINT.md) §-2 y [ESTADO_DELARTE_2026.md](ESTADO_DELARTE_2026.md)):
 
 | Métrica | Valor (oct 2026) | Valor (ago 2026) |
 |---|---|---|

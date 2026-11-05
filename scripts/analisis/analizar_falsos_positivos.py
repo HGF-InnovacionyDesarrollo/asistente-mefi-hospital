@@ -3,7 +3,7 @@
 y cada falso negativo, y estado de las variables por grupo.
 
 Uso:
-    python scripts/analizar_falsos_positivos.py [--data-dir data/ctu_uhb]
+    python scripts/analisis/analizar_falsos_positivos.py [--data-dir data/ctu_uhb]
 
 Salida: conteo de drivers de FP/FN y CSV opcional con detalle por registro.
 No modifica la clasificación — solo diagnostica.
@@ -17,7 +17,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 sys.path.insert(0, str(Path(__file__).parent))
 
 import clinical  # noqa: E402

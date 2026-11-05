@@ -182,15 +182,38 @@ def _imagen_bytes_desde_archivo(archivo_subido, extension):
     return archivo_subido.getvalue(), DPI_RENDER_PDF  # aprox. para fotos: no traen DPI real
 
 
-def _nombre_archivo_anonimizado(sufijo: str) -> str:
-    """Genera un nombre de archivo a partir de la hora de subida, nunca del nombre
+def _nombre_archivo_anonimizado(sufijo: str, id_caso: str | None = None, fecha_hora: str | None = None) -> str:
+    """Genera un nombre de archivo a partir del ID y la fecha del caso, nunca del nombre
     original del archivo subido — ese nombre puede traer el nombre real del paciente
     (pasó en la práctica: un CSV digitalizado quedó guardado como
     "Javiera Antonia Millán Ortiz ..._extraido.csv" porque se usaba
-    `archivo_subido.name` directo). Ver convención en data/README.md."""
-    import datetime
+    `archivo_subido.name` directo). Ver convención en data/README.md.
 
-    marca = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    Con ID de caso y fecha devuelve `YYYY-MM-DD_<id><sufijo>` (trazable, sin
+    timestamp ni colisiones entre reruns). La fecha se tolera en ISO
+    (YYYY-MM-DD) o chilena (DD/MM/YYYY, DD-MM-YYYY); si falta, usa la fecha
+    actual y si falta el ID usa `sin-id`. Sin ambos, fallback al timestamp de
+    subida, que garantiza unicidad."""
+    import datetime
+    import re
+
+    ahora = datetime.datetime.now()
+    if id_caso or fecha_hora:
+        fecha = ahora.strftime("%Y-%m-%d")
+        if fecha_hora:
+            m = re.search(r"(\d{4})-(\d{2})-(\d{2})", fecha_hora) or re.search(
+                r"(\d{2})[/-](\d{2})[/-](\d{4})", fecha_hora
+            )
+            if m:
+                g = m.groups()
+                fecha = f"{g[0]}-{g[1]}-{g[2]}" if len(g[0]) == 4 else f"{g[2]}-{g[1]}-{g[0]}"
+        id_limpio = "sin-id"
+        if id_caso:
+            limpio = re.sub(r"[^a-z0-9_-]+", "", str(id_caso).lower().replace(" ", "-"))
+            if limpio:
+                id_limpio = limpio
+        return f"{fecha}_{id_limpio}{sufijo}"
+    marca = ahora.strftime("%Y%m%d_%H%M%S")
     return f"{marca}{sufijo}"
 
 
@@ -406,7 +429,11 @@ if archivo_subido is not None:
                 st.info(adv)
 
             os.makedirs("data/extracted", exist_ok=True)
-            nombre_csv = _nombre_archivo_anonimizado("_extraido.csv")
+            nombre_csv = _nombre_archivo_anonimizado(
+                "_extraido.csv",
+                id_caso=st.session_state.get("meta_id") or (meta or {}).get("id"),
+                fecha_hora=(meta or {}).get("fecha_hora"),
+            )
             ruta_destino = os.path.join("data/extracted", nombre_csv)
             resultado.df.to_csv(ruta_destino, index=False)
             st.caption(f"Guardado como `{ruta_destino}` (nombre anonimizado, no el del archivo subido).")

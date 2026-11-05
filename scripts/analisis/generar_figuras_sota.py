@@ -12,8 +12,8 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 
-DOCS = Path(__file__).parent.parent / "docs"
-DOCS.mkdir(exist_ok=True)
+DOCS = Path(__file__).parents[2] / "docs" / "figs"
+DOCS.mkdir(parents=True, exist_ok=True)
 
 AZUL = "#2563eb"
 GRIS = "#64748b"

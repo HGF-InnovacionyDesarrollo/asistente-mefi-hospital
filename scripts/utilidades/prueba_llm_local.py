@@ -9,7 +9,7 @@ estratégias de generación del informe:
      de idioma" (la variante que se evalúa para el informe bilingüe).
 
 Uso:
-    python scripts/prueba_llm_local.py [--record-id 1001]
+    python scripts/utilidades/prueba_llm_local.py [--record-id 1001]
 
 Requiere: servidor Ollama corriendo (ollama serve) y el modelo ya descargado
 (ollama pull qwen3:4b). No toca la nube: todo va a localhost:11434.
@@ -24,7 +24,7 @@ from pathlib import Path
 
 import numpy as np
 
-RAIZ = Path(__file__).parent.parent
+RAIZ = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(RAIZ / "src"))
 sys.path.insert(0, str(RAIZ / "scripts"))
 

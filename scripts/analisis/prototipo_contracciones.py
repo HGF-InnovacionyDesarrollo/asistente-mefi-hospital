@@ -7,7 +7,7 @@ Validación sobre CTU-UHB sin tocar clinical.py todavía:
 - sensibilidad/especificidad resultante.
 
 Uso:
-    python scripts/prototipo_contracciones.py [--data-dir data/ctu_uhb]
+    python scripts/analisis/prototipo_contracciones.py [--data-dir data/ctu_uhb]
 """
 
 import argparse
@@ -17,7 +17,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 sys.path.insert(0, str(Path(__file__).parent))
 
 import clinical  # noqa: E402

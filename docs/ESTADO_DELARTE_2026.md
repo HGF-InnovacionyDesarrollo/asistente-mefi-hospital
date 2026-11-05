@@ -12,7 +12,7 @@ La pregunta que motiva esta actualización es si la especificidad baja del clasi
 
 Consecuencias prácticas para este proyecto: (1) el clasificador por reglas se mantiene como está, orientado a sensibilidad; (2) se adoptó un detector de contracciones con respaldo en la literatura de procesamiento de señal TOCO, que hace fisiológicamente plausible el conteo (mediana 11-17 contracciones por registro de ~80 min frente a las 90 del detector anterior) y habilita el criterio NICE de tachisistolia como 4ª variable del semáforo; (3) se incorpora el área bajo las desaceleraciones como medida de severidad cuantitativa, por ser la feature individual con mejor discriminación documentada; (4) la validación ahora reporta PPV/NPV/exactitud balanceada y AUROC por feature, alineada con la métrica de la literatura. El intento de reemplazar el proxy de "desaceleraciones repetitivas" por el criterio real de FIGO (>50% de contracciones) se re-evaluó con el detector nuevo y se confirmó como no adoptable: sube la especificidad a ~64% pero baja la sensibilidad a ~67.5%, un intercambio que viola la regla de oro del proyecto.
 
-![Trade-off sensibilidad/especificidad de los métodos publicados contra pH < 7.05, incluido este MVP](docs/fig_sens_spec_tradeoff.png)
+![Trade-off sensibilidad/especificidad de los métodos publicados contra pH < 7.05, incluido este MVP](figs/fig_sens_spec_tradeoff.png)
 
 ---
 
@@ -22,7 +22,7 @@ CTU-UHB (552 registros intraparto, FHR+UC a 4 Hz, outcome de pH de cordón, 40 c
 
 La tabla comparativa de DeepCTG® 1.0 (Frontiers in Pediatrics, 2023) es la referencia canónica: regresión logística sobre CTU-UHB (Gatellier 2020) AUC 0.72; SVM disperso (Abry 2018) 0.72; CNN entrenado en Oxford y evaluado en CTU-UHB (Petrozziello 2018) 0.82 — valor atípico no replicado; CNN entrenado y evaluado en CTU-UHB (Ogasawara 2021) 0.73; CNN (Fergus 2021) 0.73; y el propio DeepCTG® 1.0 (regresión logística con 4 features interpretables) 0.74 (IC 95% 0.66-0.81). En 2026, los modelos CAP (CNN/Transformer/LSTM/CfC) entrenados con 20.780 trazados de tres hospitales terciarios alcanzaron AUROC 0.709-0.730 al validarse externamente sobre CTU-UHB, superando a 10.571 respuestas de expertos humanos (0.715) en comparación nacional — pero sin escapar del rango 0.68-0.75.
 
-![AUC reportado sobre CTU-UHB por método, 2018-2026](docs/fig_auroc_ctu_uhb.png)
+![AUC reportado sobre CTU-UHB por método, 2018-2026](figs/fig_auroc_ctu_uhb.png)
 
 | Método | Entrenamiento | Evaluación | Métrica principal | Fuente |
 |---|---|---|---|---|

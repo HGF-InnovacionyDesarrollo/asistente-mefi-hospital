@@ -3,7 +3,7 @@
 ## En una línea
 
 ```powershell
-cd "c:\MVP - MEFI"; .\venv\Scripts\Activate.ps1; python scripts/validar_ctu_uhb.py
+cd "c:\MVP - MEFI"; .\venv\Scripts\Activate.ps1; python scripts/pipeline/validar_ctu_uhb.py
 ```
 
 ---
@@ -18,7 +18,7 @@ cd "c:\MVP - MEFI"
 
 ### 2. Ejecuta la validación
 ```powershell
-python scripts/validar_ctu_uhb.py --record-id 1001
+python scripts/pipeline/validar_ctu_uhb.py --record-id 1001
 ```
 
 ### 3. Verifica la salida
@@ -84,18 +84,18 @@ Tu lógica clínica (`src/clinical.py`) detectó:
 
 ### Validar múltiples registros
 ```powershell
-python scripts/validar_ctu_uhb.py --record-id 1002
-python scripts/validar_ctu_uhb.py --record-id 1003
+python scripts/pipeline/validar_ctu_uhb.py --record-id 1002
+python scripts/pipeline/validar_ctu_uhb.py --record-id 1003
 ```
 
 ### Salida en JSON (para análisis posterior)
 ```powershell
-python scripts/validar_ctu_uhb.py --record-id 1001 --json > validation.json
+python scripts/pipeline/validar_ctu_uhb.py --record-id 1001 --json > validation.json
 ```
 
 ### Modo verbose (más detalles)
 ```powershell
-python scripts/validar_ctu_uhb.py --record-id 1001 -v
+python scripts/pipeline/validar_ctu_uhb.py --record-id 1001 -v
 ```
 
 ---
@@ -142,9 +142,9 @@ Hay **dos caminos** para que el sistema procese CTG:
 ## 📚 Para entender más
 
 - **Documentación completa**: [VALIDACION_CTU_UHB.md](VALIDACION_CTU_UHB.md)
-- **Código de validación**: [scripts/validar_ctu_uhb.py](scripts/validar_ctu_uhb.py)
+- **Código de validación**: [scripts/pipeline/validar_ctu_uhb.py](scripts/pipeline/validar_ctu_uhb.py)
 - **Lógica clínica**: [src/clinical.py](src/clinical.py)
-- **Checkpoint del proyecto**: [CHECKPOINT.md](CHECKPOINT.md)
+- **Checkpoint del proyecto**: [CHECKPOINT.md](../CHECKPOINT.md)
 
 ---
 

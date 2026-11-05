@@ -2,9 +2,9 @@
 """Descarga registros del dataset CTU-UHB (PhysioNet) a data/ctu_uhb/.
 
 Uso:
-    python scripts/descargar_ctu_uhb.py --n-records 10
-    python scripts/descargar_ctu_uhb.py --record-ids 1001 1002 1003
-    python scripts/descargar_ctu_uhb.py --all   # los 552 registros completos
+    python scripts/pipeline/descargar_ctu_uhb.py --n-records 10
+    python scripts/pipeline/descargar_ctu_uhb.py --record-ids 1001 1002 1003
+    python scripts/pipeline/descargar_ctu_uhb.py --all   # los 552 registros completos
 
 data/ctu_uhb/ está gitignored: los .hea/.dat nunca se commitean, se
 regeneran corriendo este script.

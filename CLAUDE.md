@@ -2,13 +2,13 @@
 
 > Contexto de orientación. El **historial detallado de decisiones vive en
 > [CHECKPOINT.md](CHECKPOINT.md)** — léelo antes de tocar `src/clinical.py`,
-> `src/digitizer.py` o los umbrales FIGO. Este archivo no lo duplica.
+> `src/digitizer.py` o los umbrales FIGO. El plan vivo de pendientes está en
+> [ROADMAP.md](ROADMAP.md). Este archivo no los duplica.
 >
 > ⚠️ `CHECKPOINT.md` manda a leer
 > `C:\Users\usuariohgf\.claude\plans\composed-sniffing-moler.md` antes de
-> tocar código. **Ese archivo ya no existe** (verificado 14-09-2026; solo
-> sobrevive `lucky-skipping-patterson.md`). No lo busques: `CHECKPOINT.md`
-> es hoy la única fuente del porqué de cada decisión.
+> tocar código. **Ese archivo ya no existe** (verificado 14-09-2026). No lo
+> busques: `CHECKPOINT.md` es hoy la única fuente del porqué de cada decisión.
 
 ## 1. Qué es
 
@@ -27,22 +27,30 @@ referencia al ensayo INFANT (Lancet 2017).
 
 ## 2. Reglas duras — datos de pacientes
 
-- `Casos/` contiene **~84 archivos de casos reales del hospital** (PDF/JPEG de
-  tiras impresas) con `ID:` y `Nombre:` visibles en el encabezado, repetidos
-  en cada segmento de la tira, no solo arriba. **No están anonimizados.**
+- `casos_hospital/` contiene **81 escaneos originales del hospital** (JPG/PDF
+  de tiras impresas) con `ID:` y `Nombre:` visibles en la cabecera de cada
+  segmento de la tira. **No están anonimizados por dentro** — solo los
+  nombres de archivo lo están (`YYYY-MM-DD_casoNN_Hora.ext`, asignado por
+  `scripts/pipeline/mapear_casos.py` el 05-11-2026).
+- El mapeo nombre-real ↔ casoNN vive **fuera del proyecto** en
+  `C:\MEFI-privado\mapeo_casos.csv`. Contiene PHI: nunca lo muevas al repo
+  ni a una carpeta sincronizada a la nube.
 - Trabaja siempre desde `fixtures/casos_redactados/` (53 PNG ya redactados por
-  `scripts/redactar_casos.py`), nunca desde los originales.
+  `scripts/pipeline/redactar_casos.py`), nunca desde los originales.
 - **Nada de esto sale del equipo**: ni a OpenRouter, ni a Hugging Face, ni a
   artefactos publicados, ni a la web. La gobernanza de datos con OpenRouter
   **sigue sin resolverse formalmente**; hasta que el usuario lo confirme, con
   datos reales solo Ollama local o fixtures sintéticas.
-- `Casos/`, `fixtures/`, `data/ctu_uhb/`, `data/raw_scans/`,
-  `data/processed_scans/` y `src/data/` están en `.gitignore`. Revisa el
-  `.gitignore` antes de agregar cualquier carpeta de datos nueva.
-- **Nunca pongas un nombre de paciente en un nombre de archivo**, un mensaje de
-  commit ni una regla de permisos. Ya pasó dos veces y hubo que reescribir
+- `casos_hospital/`, `fixtures/`, `data/ctu_uhb/` y `data/extracted/` están
+  en `.gitignore`. Revisa el `.gitignore` antes de agregar cualquier carpeta
+  de datos nueva.
+- **Nunca pongas un nombre de paciente en un nombre de archivo**, un mensaje
+  de commit ni una regla de permisos. Ya pasó dos veces y hubo que reescribir
   historial de git para limpiarlo (ver CHECKPOINT §0 y §1.1).
 - Estándar de nombres: `YYYY-MM-DD_IDPaciente_HoraInicio` (ver `data/README.md`).
+- ⚠️ `redactar_casos.py` lee de `C:\Users\usuariohgf\Desktop\Casos` (fuera del
+  repo). Verificar (Fase 0, pendiente de confirmación del usuario) que esa
+  carpeta del Escritorio tampoco se sincronice a Drive/OneDrive.
 
 ## 3. Entorno
 
@@ -65,19 +73,24 @@ referencia al ensayo INFANT (Lancet 2017).
 | `src/clinical.py` | Reglas clínicas. Línea base, variabilidad, aceleraciones, desaceleraciones (precoz/tardía/variable), patrón sinusoidal, `clasificar_figo()`. Entrada única: `extraer_features(df)`. |
 | `src/prompts.py` | Importa los umbrales **directo de `clinical.py`** para que no se desincronicen. |
 | `src/llm_client.py` + `config.yaml` | Proveedor LLM 100% configurable por datos (Ollama / OpenRouter / Hugging Face). Agregar proveedor = agregar bloque en el YAML, sin tocar código. |
-| `src/app.py` | UI Streamlit. |
-| `scripts/validar_ctu_uhb.py` | Validación contra los 552 registros de CTU-UHB (PhysioNet), `--all` para batch con matriz de confusión. |
+| `src/app.py` | UI Streamlit. Exporta extracciones como `YYYY-MM-DD_<id-caso>_extraido.csv` (ID editable + fecha OCR; nunca el nombre del archivo subido). |
+
+Scripts organizados en `scripts/pipeline/` (datos y validación: `validar_ctu_uhb`,
+`descargar_ctu_uhb`, `create_csv_database`, `redactar_casos`, `mapear_casos`),
+`scripts/analisis/` (estudios históricos) y `scripts/utilidades/` (smoke tests
+y herramientas de equipo). Detalle de cada uno en `scripts/README.md`.
 
 ## 5. Estado y el problema abierto
 
 Fases 1-4 completas, Fase 5 (disclaimer) parcial. Validación contra CTU-UHB:
 **sensibilidad 95%, especificidad ~11%** (oct 2026; era 12.3% con el detector de
 UA viejo, ver CHECKPOINT §-2). La especificidad baja **ya no es un problema a
-resolver**: la investigación de estado del arte ([ESTADO_DELARTE_2026.md](ESTADO_DELARTE_2026.md))
+resolver**: la investigación de estado del arte
+([docs/ESTADO_DELARTE_2026.md](docs/ESTADO_DELARTE_2026.md))
 confirmó que el techo AUC sobre CTU-UHB para todo método publicado es 0.68-0.75
 y que FIGO es por diseño un indicador de alta sensibilidad / bajo PPV. Mejorarla
 de verdad requeriría un score continuo de riesgo entrenado (propuesta futura,
-tipo DeepCTG), no más ajustes de reglas.
+tipo DeepCTG — ROADMAP Fase 3), no más ajustes de reglas.
 
 Esa especificidad baja **ya no es un bug** — se persiguió a fondo el 26-ago. Se
 intentó reemplazar el proxy de "desaceleraciones repetitivas" (3+ en 20 min) por
@@ -89,15 +102,16 @@ apoyo clínico, perder hipoxias reales es mucho peor que sobre-alertar.
 **No vuelvas a "arreglar" la especificidad ajustando umbrales sobre el mismo
 detector de UA.** Requiere una detección de contracciones genuinamente mejor.
 
-Pendiente declarado: empaquetado instalable para otros computadores del hospital.
+Pendientes declarados y priorizados: [ROADMAP.md](ROADMAP.md) (Fase 1:
+empaquetado instalable, es la siguiente).
 
 ## 6. Reglas para el agente
 
 - Antes de cambiar un umbral clínico: corre `pytest` **y** el batch de 552
-  (`scripts/validar_ctu_uhb.py --all`), y reporta sensibilidad/especificidad
+  (`scripts/pipeline/validar_ctu_uhb.py --all`), y reporta sensibilidad/especificidad
   antes y después. Un cambio que sube especificidad bajando sensibilidad no es
   una mejora.
 - La FCF fuera de 50-220 lpm es dropout del sensor, no dato. Filtrar siempre
   (`fcf_confiable`).
-- Si cierras un bloque de trabajo, actualiza `CHECKPOINT.md` — es el mecanismo
-  de traspaso real de este proyecto.
+- Si cierras un bloque de trabajo, actualiza `CHECKPOINT.md` (bitácora) y
+  `ROADMAP.md` (estado de tareas) — son el mecanismo de traspaso de este proyecto.
