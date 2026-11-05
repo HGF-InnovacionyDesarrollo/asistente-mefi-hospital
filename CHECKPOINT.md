@@ -18,7 +18,7 @@
 - **Limpieza:** eliminados duplicados y restos — `Mefi_muestra.csv` (0 bytes), duplicado byte-idéntico `20261016_111907_extraido.csv`, `2026-08-18_caso04.csv` (calibración rota, FCF −5831), `src/data/` (2 CSV con UA −22014), carpetas vacías `data/raw_scans/` + `data/processed_scans/` (se reintroducen solo si la Fase 1 los usa), restos de sincronización Drive (`.tmp.drive*`, 2× `desktop.ini`), `__pycache__`/`.pytest_cache`.
 - **`app.py::_nombre_archivo_anonimizado`:** las extracciones ahora se guardan como `YYYY-MM-DD_<id-caso>_extraido.csv` usando el ID de registro (editable en UI u OCR de cabecera) y la fecha OCR; fallback a timestamp si no hay metadata. Elimina la clase de duplicados tipo `20261016_1118xx`.
 - **`fixtures/muestras_digitizer/`** recibe lo que era `Casos/Finales/samples/` (casos/crops/simples).
-- **Pendiente de este bloque (no bloqueante):** confirmar que `C:\Users\usuariohgf\Desktop\Casos` (fuente de `redactar_casos.py`) tampoco se sincroniza a la nube, y sacar `C:\MVP - MEFI` de Google Drive (encontramos `.tmp.driveupload/466395` = índice de git: Drive estuvo tocando el repo).
+- **Privacidad confirmada (05-11-2026, usuario):** el proyecto ya no se sincroniza con Google Drive; `C:\Users\usuariohgf\Desktop\Casos` ya no existe (si hay que re-redactar casos, actualizar `SRC_DIR` en `redactar_casos.py`).
 - **Verificación:** `pytest` 25/25 y `scripts/pipeline/validar_ctu_uhb.py --all` con métricas idénticas a oct-2026 (la reorganización no tocó lógica clínica).
 
 ### Calibración semi-automática + lanzador MEFI.bat (15 oct 2026)

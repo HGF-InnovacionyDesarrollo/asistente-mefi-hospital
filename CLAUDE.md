@@ -48,9 +48,10 @@ referencia al ensayo INFANT (Lancet 2017).
   de commit ni una regla de permisos. Ya pasó dos veces y hubo que reescribir
   historial de git para limpiarlo (ver CHECKPOINT §0 y §1.1).
 - Estándar de nombres: `YYYY-MM-DD_IDPaciente_HoraInicio` (ver `data/README.md`).
-- ⚠️ `redactar_casos.py` lee de `C:\Users\usuariohgf\Desktop\Casos` (fuera del
-  repo). Verificar (Fase 0, pendiente de confirmación del usuario) que esa
-  carpeta del Escritorio tampoco se sincronice a Drive/OneDrive.
+- Nota: `redactar_casos.py` lee de `SRC_DIR`, hoy apuntado a
+  `C:\Users\usuariohgf\Desktop\Casos` — carpeta que **ya no existe**
+  (confirmado 05-11-2026). Antes de re-redactar casos, actualizar `SRC_DIR`
+  dentro del script.
 
 ## 3. Entorno
 
