@@ -11,6 +11,10 @@
 
 ## Historial de decisiones clave
 
+### Guía general para profesionales (05 nov 2026)
+
+- Nuevo `docs/GUIA_PROFESIONALES.md`: qué es el sistema, objetivos, uso paso a paso, límites validados explicados en palabras simples, privacidad y glosario — en lenguaje neutro para audiencias no técnicas (clínica, innovación, TI, gestión). Enlazada desde CLAUDE.md §1.
+
 ### Reorganización Fase 0 — higiene, privacidad y base de casos (05 nov 2026)
 
 - **Estructura:** `scripts/` dividido en `pipeline/` + `analisis/` + `utilidades/` con `scripts/README.md`; documentos movidos a `docs/` (`ESTADO_DELARTE_2026.md`, `VALIDACION_CTU_UHB.md`, `VALIDAR_CTU_UHB_QUICK_START.md`; figuras a `docs/figs/`); creado `ROADMAP.md` (plan vivo — los pendientes de este archivo migraron ahí).

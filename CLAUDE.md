@@ -25,6 +25,9 @@ estás revirtiendo una decisión deliberada.
 Es **apoyo a decisión, no diagnóstico** — hay disclaimer en la UI con la
 referencia al ensayo INFANT (Lancet 2017).
 
+Guía en lenguaje neutro para profesionales no técnicos (qué es, objetivos,
+uso, límites, privacidad): [docs/GUIA_PROFESIONALES.md](docs/GUIA_PROFESIONALES.md).
+
 ## 2. Reglas duras — datos de pacientes
 
 - `casos_hospital/` contiene **81 escaneos originales del hospital** (JPG/PDF
