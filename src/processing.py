@@ -4,6 +4,8 @@ import os
 
 import pandas as pd
 
+import rutas
+
 # Rango clínico normal de FCF (latidos por minuto)
 FCF_MIN_NORMAL = 110
 FCF_MAX_NORMAL = 160
@@ -18,8 +20,9 @@ def procesar_mefi(ruta_archivo):
     Returns:
         dict con 'media_fcf' y 'std_fcf'.
     """
-    # Construir la ruta completa al archivo dentro de data/
-    ruta_completa = os.path.join("data", ruta_archivo)
+    # Construir la ruta completa al archivo dentro de data/ (escribible
+    # segun rutas: MEFI_HOME en instalado, raiz del proyecto en desarrollo)
+    ruta_completa = os.path.join(str(rutas.ruta_escritura("data")), ruta_archivo)
 
     # Leer el archivo CSV en un DataFrame de pandas
     df = pd.read_csv(ruta_completa)

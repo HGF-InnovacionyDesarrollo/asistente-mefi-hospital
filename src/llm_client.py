@@ -3,15 +3,15 @@ import yaml
 from openai import OpenAI
 from dotenv import load_dotenv
 
-load_dotenv()
+import rutas
+
+load_dotenv(rutas.ruta_escritura(".env"))
 
 def cargar_config():
-    """Carga la configuración desde el archivo config.yaml"""
-    config_path = os.path.join(os.path.dirname(__file__), "..", "config.yaml")
-    if not os.path.exists(config_path):
-        # Intentar ruta alternativa si se ejecuta desde la raíz
-        config_path = "config.yaml"
-    
+    """Carga la configuración desde config.yaml (copia de MEFI_HOME si aplica,
+    si no la plantilla que acompaña al código)."""
+    config_path = rutas.ruta_lectura("config.yaml")
+
     with open(config_path, "r", encoding="utf-8") as f:
         return yaml.safe_load(f)
 

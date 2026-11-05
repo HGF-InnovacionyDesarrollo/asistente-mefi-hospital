@@ -45,8 +45,11 @@ st.warning(
 # --- BARRA LATERAL: SELECTOR DINÁMICO DE ENTORNO ---
 st.sidebar.header("⚙️ Configuración de Inferencia")
 
-CONFIG_PATH = "config.yaml" if os.path.exists("config.yaml") else os.path.join("..", "config.yaml")
-ENV_PATH = ".env" if os.path.exists(".env") or not os.path.exists(os.path.join("..", ".env")) else os.path.join("..", ".env")
+import rutas
+
+rutas.sembrar_home()
+CONFIG_PATH = str(rutas.ruta_lectura("config.yaml"))
+ENV_PATH = str(rutas.ruta_escritura(".env"))
 
 
 def cargar_config_app():
@@ -338,7 +341,7 @@ if archivo_subido is not None:
     if extension == ".csv":
         try:
             nombre_anonimo = _nombre_archivo_anonimizado(".csv")
-            ruta_destino = os.path.join("data", nombre_anonimo)
+            ruta_destino = os.path.join(str(rutas.ruta_escritura("data")), nombre_anonimo)
             with open(ruta_destino, "wb") as f:
                 f.write(archivo_subido.getbuffer())
             resultado = procesar_mefi(nombre_anonimo)
@@ -428,13 +431,12 @@ if archivo_subido is not None:
             for adv in resultado.advertencias:
                 st.info(adv)
 
-            os.makedirs("data/extracted", exist_ok=True)
             nombre_csv = _nombre_archivo_anonimizado(
                 "_extraido.csv",
                 id_caso=st.session_state.get("meta_id") or (meta or {}).get("id"),
                 fecha_hora=(meta or {}).get("fecha_hora"),
             )
-            ruta_destino = os.path.join("data/extracted", nombre_csv)
+            ruta_destino = os.path.join(str(rutas.ruta_escritura("data/extracted")), nombre_csv)
             resultado.df.to_csv(ruta_destino, index=False)
             st.caption(f"Guardado como `{ruta_destino}` (nombre anonimizado, no el del archivo subido).")
             with st.expander("Ver CSV digitalizado"):

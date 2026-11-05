@@ -12,6 +12,7 @@ parte de la app; se invocan a mano según se necesite.
 | `descargar_ctu_uhb.py` | Descarga registros `.hea/.dat` de CTU-UHB (PhysioNet) a `data/ctu_uhb/`. |
 | `create_csv_database.py` | Convierte `data/ctu_uhb/` a CSVs espejo en `data/extracted/ctu_uhb/` + outcomes. |
 | `validar_ctu_uhb.py` | Validación de la clasificación FIGO/NICE contra el outcome real (pH de cordón). `--all` para los 552 registros. |
+| `build_portable.py` | Construye `dist/MEFI-portable/` (Fase 1): Python embebido + dependencias + app; insumos del instalador InnoSetup. |
 
 ## analisis/ — estudios que respaldan decisiones (históricos, no del flujo diario)
 
@@ -29,3 +30,4 @@ parte de la app; se invocan a mano según se necesite.
 | `test_conexion.py` | Prueba manual de conexión a OpenRouter (no es test de pytest: ejecuta código al importarse). |
 | `verificar_modelos.py` | Lista los modelos disponibles en la cuenta configurada. |
 | `crear_acceso_directo.ps1` | Crea el acceso directo de escritorio a `MEFI.bat`. |
+| `generar_guia_docx.py` | Vuelca `docs/GUIA_PROFESIONALES.md` a `GUIA_PROFESIONALES.docx` (Word) en la raíz. Correrlo tras editar la guía. |

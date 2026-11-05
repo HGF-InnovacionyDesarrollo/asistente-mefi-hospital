@@ -11,6 +11,14 @@
 
 ## Historial de decisiones clave
 
+### Empaquetado instalable — Fase 1 en curso (05 nov 2026)
+
+- **Enfoque elegido:** bundle portable con **Python embebido** (no PyInstaller: streamlit+PyInstaller es frágil) + script InnoSetup (`installer/mefi.iss`) que lo empaqueta en `Setup.exe` con instalación por usuario (`{localappdata}`, sin administrador). `scripts/pipeline/build_portable.py` construye `dist/MEFI-portable/` (descarga python-3.14.x-embed, habilita site-packages en el `._pth`, instala `requirements.txt`, copia `src/`, `MEFI.bat`, `config.yaml`, guía Word y README).
+- **Portabilidad de rutas (nuevo `src/rutas.py`):** todas las rutas dejan de depender del cwd. En el bundle, `MEFI.bat` define `MEFI_HOME=%LOCALAPPDATA%\MEFI` y la app siembra ahí `config.yaml`, `.env` y `data/` (config y datos deben ser escribibles aunque la app se instale en carpeta de solo lectura). En desarrollo (sin `MEFI_HOME`) todo sigue en la raíz del repo, comportamiento idéntico al histórico.
+- **Tesseract configurable:** `digitizer` acepta `MEFI_TESSERACT` (env) y `tesseract\tesseract.exe` junto al bundle, además de las rutas de instalación clásicas. La app ya degradaba bien sin OCR (confirmado: `_TESSERACT_OK` guarda todos los puntos de llamada).
+- **`MEFI.bat`:** ahora prefiere `python\python.exe` del bundle (sin venv ni pip en el equipo destino) y conserva el flujo venv para el repo. `crear_acceso_directo.ps1` resuelve la raíz desde su propia ubicación en vez de ruta dura.
+- **Verificación local:** pytest 25/25; smoke de streamlit con el Python del repo (HTTP 200) y con el **Python embebido del bundle** (HTTP 200); **modo instalado verificado** (`MEFI_HOME` en ruta limpia: siembra de `config.yaml` + `data/`, `ruta_escritura` y lectura de providers por `llm_client` OK); batch CTU-UHB idéntico. **Pendiente para cerrar la fase:** prueba de punta a punta en un PC limpio del hospital (instalar Setup.exe → doble clic → digitalizar un caso) + decisión de gobernanza LLM (Fase 2) antes de distribuir. Nota: `/healthz` no ejecuta el script de la app; el smoke instalado se verificó invocando `rutas`/`llm_client` directamente con el python del bundle.
+
 ### Guía general para profesionales (05 nov 2026)
 
 - Nuevo `docs/GUIA_PROFESIONALES.md`: qué es el sistema, objetivos, uso paso a paso, límites validados explicados en palabras simples, privacidad y glosario — en lenguaje neutro para audiencias no técnicas (clínica, innovación, TI, gestión). Enlazada desde CLAUDE.md §1.

@@ -9,3 +9,4 @@ data/ctu_uhb/
 data/extracted/
 data/prueba_llm_local/
 .tmp.drive*/
+dist/

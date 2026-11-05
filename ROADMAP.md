@@ -7,7 +7,7 @@ estado de la tarea aquí y registrar el qué/cómo/porqué en
 | Fase | Objetivo | Prioridad | Estado | Criterio de "hecho" |
 |---|---|---|---|---|
 | **0. Higiene y privacidad** | Reorganización de carpetas, anonimización de escaneos, limpieza de duplicados, ROADMAP de seguimiento | Alta | En curso | `pytest` 25/25 + batch CTU-UHB con métricas idénticas a las de oct-2026 + cero PHI en nombres de archivo del proyecto |
-| **1. Empaquetado instalable** | PyInstaller/InnoSetup para otros PCs del hospital | Alta | No iniciado | El instalador funciona de punta a punta en un PC limpio del hospital |
+| **1. Empaquetado instalable** | Bundle portable con Python embebido + instalador InnoSetup para otros PCs del hospital | Alta | **En curso** | `MEFI-Setup.exe` compilado y verificado localmente (242 MB, 05-11-2026); falta prueba de punta a punta en un PC limpio del hospital |
 | **2. Gobernanza de datos LLM** | Decidir qué proveedor (OpenRouter / Hugging Face / Ollama) puede ver qué datos | Alta | No iniciado | Documento aprobado por el equipo; hasta entonces, datos reales solo con Ollama local |
 | **3. Score continuo de riesgo** | Prototipo tipo DeepCTG sobre CTU-UHB (contexto: techo AUC ~0.75 publicado, ver `docs/ESTADO_DELARTE_2026.md`) | Media | Futuro | AUC claramente por encima del clasificador por reglas en validación local justifica integración |
 | **4. Canal FCF materna** | Soporte de segundo canal si el hardware del hospital lo permite | Baja | Futuro | Detección validada con hardware real |

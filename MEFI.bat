@@ -4,19 +4,27 @@ cd /d "%~dp0"
 title Asesor Clinico MEFI
 
 echo ============================================================
-echo   ASESOR CLINICO MEFI - Instalacion y arranque
+echo   ASESOR CLINICO MEFI - Hospital Gustavo Fricke
 echo ============================================================
 echo.
 
-REM --- 1. Buscar un interprete de Python instalado en el equipo ---
-REM (se usa "&&" y no %errorlevel% dentro de bloques: %errorlevel% se
-REM  expande antes de ejecutar el bloque y quedaria con el valor viejo)
-set "PY="
-where py >nul 2>&1 && (py -3 -c "import sys" >nul 2>&1 && set "PY=py -3")
-if not defined PY (
-    where python >nul 2>&1 && (python -c "import sys" >nul 2>&1 && set "PY=python")
+REM --- 1. Interprete de Python: bundle portable (python\) o entorno del repo ---
+REM RUNPY lleva comillas propias cuando la ruta puede tener espacios.
+set "RUNPY="
+if exist "%~dp0python\python.exe" (
+    set "RUNPY=""%~dp0python\python.exe"""
+    if not defined MEFI_HOME set "MEFI_HOME=%LOCALAPPDATA%\MEFI"
+    if exist "%~dp0tesseract\tesseract.exe" set "MEFI_TESSERACT=%~dp0tesseract\tesseract.exe"
+    echo [OK] Python incluido en el paquete.
+    goto :deps_ok
 )
-if not defined PY (
+
+set "PYDETECT="
+where py >nul 2>&1 && (py -3 -c "import sys" >nul 2>&1 && set "PYDETECT=py -3")
+if not defined PYDETECT (
+    where python >nul 2>&1 && (python -c "import sys" >nul 2>&1 && set "PYDETECT=python")
+)
+if not defined PYDETECT (
     echo [ERROR] No se encontro Python instalado.
     echo.
     echo Para instalarlo ^(una sola vez, con derechos de administrador^):
@@ -27,13 +35,13 @@ if not defined PY (
     pause
     exit /b 1
 )
-echo [OK] Python encontrado: %PY%
+echo [OK] Python encontrado: %PYDETECT%
 
 REM --- 2. Crear el entorno virtual la primera vez e instalar dependencias ---
 if not exist "venv\Scripts\python.exe" (
     echo.
     echo [1/3] Primera ejecucion: creando entorno virtual...
-    %PY% -m venv venv
+    %PYDETECT% -m venv venv
     if errorlevel 1 (
         echo [ERROR] No se pudo crear el entorno virtual.
         pause
@@ -53,9 +61,11 @@ if not exist "venv\.listo" (
 ) else (
     echo [OK] Dependencias ya instaladas - se omite la instalacion.
 )
+set "RUNPY=venv\Scripts\python.exe"
 
+:deps_ok
 REM --- 3. Avisar si falta Tesseract OCR (opcional pero recomendado) ---
-venv\Scripts\python.exe -c "import pytesseract; pytesseract.get_tesseract_version()" >nul 2>&1
+%RUNPY% -c "import pytesseract; pytesseract.get_tesseract_version()" >nul 2>&1
 if errorlevel 1 (
     echo.
     echo [AVISO] No se detecto Tesseract OCR. La app funciona igual, pero la
@@ -69,7 +79,7 @@ set PYTHONIOENCODING=utf-8
 start "" http://localhost:8501
 %SystemRoot%\System32\timeout.exe /t 5 /nobreak >nul 2>&1
 if errorlevel 1 ping -n 6 127.0.0.1 >nul
-venv\Scripts\python.exe -m streamlit run src\app.py --server.port 8501
+%RUNPY% -m streamlit run src\app.py --server.port 8501
 
 echo.
 echo La aplicacion se cerro. Esta ventana puede cerrarse.

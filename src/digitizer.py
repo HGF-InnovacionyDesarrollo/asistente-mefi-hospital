@@ -29,8 +29,14 @@ TESSERACT_CANDIDATES = [
 def _configurar_tesseract() -> bool:
     import os
 
-    for candidato in TESSERACT_CANDIDATES:
-        if os.path.exists(candidato):
+    raiz_bundle = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
+    candidatos = [
+        os.environ.get("MEFI_TESSERACT"),  # definido por MEFI.bat del bundle
+        os.path.join(raiz_bundle, "tesseract", "tesseract.exe"),  # vendido junto a la app
+        *TESSERACT_CANDIDATES,
+    ]
+    for candidato in candidatos:
+        if candidato and os.path.exists(candidato):
             pytesseract.pytesseract.tesseract_cmd = candidato
             return True
     return False

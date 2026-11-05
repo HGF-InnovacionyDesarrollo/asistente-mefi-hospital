@@ -78,11 +78,15 @@ uso, límites, privacidad): [docs/GUIA_PROFESIONALES.md](docs/GUIA_PROFESIONALES
 | `src/prompts.py` | Importa los umbrales **directo de `clinical.py`** para que no se desincronicen. |
 | `src/llm_client.py` + `config.yaml` | Proveedor LLM 100% configurable por datos (Ollama / OpenRouter / Hugging Face). Agregar proveedor = agregar bloque en el YAML, sin tocar código. |
 | `src/app.py` | UI Streamlit. Exporta extracciones como `YYYY-MM-DD_<id-caso>_extraido.csv` (ID editable + fecha OCR; nunca el nombre del archivo subido). |
+| `src/rutas.py` | Rutas CWD-independientes (ancladas al archivo). En el bundle instalado, `MEFI_HOME` (`%LOCALAPPDATA%\\MEFI`, definido por `MEFI.bat`) concentra datos, `config.yaml` editable y `.env` — la app siembra ahí en la primera corrida; en desarrollo todo sigue en la raíz del repo. |
 
 Scripts organizados en `scripts/pipeline/` (datos y validación: `validar_ctu_uhb`,
-`descargar_ctu_uhb`, `create_csv_database`, `redactar_casos`, `mapear_casos`),
-`scripts/analisis/` (estudios históricos) y `scripts/utilidades/` (smoke tests
-y herramientas de equipo). Detalle de cada uno en `scripts/README.md`.
+`descargar_ctu_uhb`, `create_csv_database`, `redactar_casos`, `mapear_casos`,
+`build_portable`), `scripts/analisis/` (estudios históricos) y
+`scripts/utilidades/` (smoke tests y herramientas de equipo, incl.
+`generar_guia_docx.py` que vuelca la guía a Word). El instalador para otros
+PCs del hospital es `installer/mefi.iss` (Inno Setup) sobre el bundle que
+genera `build_portable.py`. Detalle en `scripts/README.md`.
 
 ## 5. Estado y el problema abierto
 
