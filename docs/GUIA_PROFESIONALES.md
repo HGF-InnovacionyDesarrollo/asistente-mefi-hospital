@@ -56,10 +56,10 @@ Diseño deliberado relevante para la confianza clínica: **la IA nunca interpret
 1. **Abrir** la aplicación (doble clic en `MEFI.bat` o en el acceso directo "MEFI - Asesor Clínico").
 2. **Subir** la foto o el PDF del trazado. El sistema orienta la imagen y detecta automáticamente los dos paneles (frecuencia fetal arriba, actividad uterina abajo).
 3. **Revisar los metadatos** que el sistema leyó de la cabecera (identificador interno, fecha/hora de inicio, velocidad de papel). Son lectura automática de "mejor esfuerzo": corregirlos si no cuadran con el papel.
-4. **Calibrar** cada panel marcando dos puntos de referencia con valores conocidos (por ejemplo, 210 y 30 lpm en el panel fetal; 100 y 0 en el panel uterino). El sistema puede pre-marcarlos automáticamente, pero **la confirmación humana es obligatoria**.
+4. **Calibrar y validar las coordenadas** de cada panel marcando dos puntos de referencia con valores conocidos (por ejemplo, 210 y 30 lpm en el panel fetal; 100 y 0 en el panel uterino). Al usar el botón de detección automática o hacer clic sobre la imagen, el sistema dibuja una **línea azul (Punto 1)** y una **línea roja (Punto 2)** con sus etiquetas para que la persona usuaria confirme visualmente que coinciden con las líneas y números impresos en el papel.
 5. Clic en **"Digitalizar trazado"**. Se muestra la curva extraída sobre la imagen: en celeste lo leído directamente, en naranja lo reconstruido por interpolación. Cada archivo queda guardado con nombre anónimo en `data/extracted/`.
 6. **Revisar la clasificación**: categoría FIGO, semáforo por variable (línea base, variabilidad, aceleraciones, desaceleraciones, contracciones) y, si aplica, alerta de tachisistolia.
-7. Clic en **"Generar informe clínico con LLM"** para obtener el texto del informe.
+7. **Revisar el Informe por Plantilla y contrastar con IA**: el sistema entrega de inmediato un **Informe Clínico por Plantilla Protocolizada** (generado al 100 % con reglas determinísticas FIGO 2015 / NICE NG229, sin depender de IA) y, en paralelo, permite generar un segundo informe con un **modelo de lenguaje (LLM)** para contrastar ambos análisis.
 
 ### 4.3 Configuración del modelo de redacción (barra lateral)
 

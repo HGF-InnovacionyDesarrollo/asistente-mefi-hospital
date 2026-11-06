@@ -86,17 +86,37 @@ def instalar_dependencias(py_exe: Path) -> None:
     run([py_exe, "-m", "pip", "install", "--no-warn-script-location", "-r", RAIZ / "requirements.txt"])
 
 
+def _quitar_solo_lectura(func, path, _exc_info) -> None:
+    import os
+    import stat
+
+    os.chmod(path, stat.S_IWRITE)
+    func(path)
+
+
 def copiar_aplicacion() -> None:
-    for item in ("src", "MEFI.bat", "config.yaml", "GUIA_PROFESIONALES.docx"):
+    import os
+    import stat
+
+    for item in ("src", "MEFI.bat", "config.yaml", ".env", "GUIA_PROFESIONALES.docx"):
         origen = RAIZ / item
         destino = DESTINO / item
         if not origen.exists():
             print(f"[build] AVISO: no existe {origen}, se omite")
             continue
         if destino.exists():
-            shutil.rmtree(destino) if destino.is_dir() else destino.unlink()
+            if destino.is_dir():
+                shutil.rmtree(destino, onexc=_quitar_solo_lectura)
+            else:
+                os.chmod(destino, stat.S_IWRITE)
+                destino.unlink()
         if origen.is_dir():
-            shutil.copytree(origen, destino, ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
+            shutil.copytree(
+                origen,
+                destino,
+                ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
+                dirs_exist_ok=True,
+            )
         else:
             shutil.copy2(origen, destino)
 
@@ -117,8 +137,12 @@ def copiar_aplicacion() -> None:
 
 def main() -> None:
     DESTINO.mkdir(parents=True, exist_ok=True)
-    pydir = preparar_python()
-    instalar_dependencias(pydir / "python.exe")
+    py_exe = DESTINO / "python" / "python.exe"
+    if "--only-app" in sys.argv and py_exe.exists():
+        print("[build] --only-app: reutilizando python/ existente en el bundle")
+    else:
+        pydir = preparar_python()
+        instalar_dependencias(pydir / "python.exe")
     copiar_aplicacion()
     print(f"\n[build] OK: {DESTINO}")
     print("[build] Siguiente paso para Setup.exe: iscc installer\\mefi.iss (requiere Inno Setup)")

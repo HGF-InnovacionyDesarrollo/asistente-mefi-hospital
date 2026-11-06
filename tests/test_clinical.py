@@ -333,3 +333,132 @@ def test_figo_categoria_ii_desaceleraciones_tardias_repetitivas():
     features = clinical.extraer_features(df)
     assert len(features["desaceleraciones"]) == 3
     assert features["figo"]["categoria"] == "II"
+
+
+# --------------------------------------------------------------------------
+# Informe determinístico por plantilla + sembrado de .env (Fase 1.1)
+# --------------------------------------------------------------------------
+
+
+def test_generar_informe_plantilla_categorias():
+    import prompts
+
+    # Categoría I
+    tiempo = np.arange(0, 600, 1.0)
+    fcf = 140.0 + 7.0 * np.sin(2 * np.pi * tiempo / 20.0)
+    f_cat1 = clinical.extraer_features(_df(tiempo, fcf))
+    inf1 = prompts.generar_informe_plantilla(
+        f_cat1, metadatos={"id": "caso01", "fecha_hora": "2026-11-06", "velocidad_papel_cm_min": 1.0}
+    )
+    assert "Categoría FIGO I" in inf1
+    assert "caso01" in inf1
+    assert "Parámetros Cardiotocográficos Extraídos" in inf1
+    assert "Correlación Fisiopatológica" in inf1
+    assert "Conducta Sugerida según Protocolo" in inf1
+    assert "INFANT" in inf1
+
+    # Categoría III (sinusoidal)
+    tiempo_sin = np.arange(0, 1200, 1.0)
+    fcf_sin = 130.0 + 8.0 * np.sin(2 * np.pi * tiempo_sin * (4.0 / 60.0))
+    f_cat3 = clinical.extraer_features(_df(tiempo_sin, fcf_sin))
+    inf3 = prompts.generar_informe_plantilla(f_cat3)
+    assert "Categoría FIGO III" in inf3
+    assert "interrupción expedita" in inf3
+
+
+def test_completar_env_sin_pisar_existentes(tmp_path):
+    import rutas
+
+    plantilla = tmp_path / "plantilla.env"
+    destino = tmp_path / "destino.env"
+    plantilla.write_text("OPENROUTER_API_KEY=sk-bundle-123\nHF_API_KEY=hf-bundle-456\n", encoding="utf-8")
+    destino.write_text("OPENROUTER_API_KEY=sk-usuario-previa\n", encoding="utf-8")
+
+    rutas._completar_env(plantilla, destino)
+    contenido = destino.read_text(encoding="utf-8")
+    assert "OPENROUTER_API_KEY=sk-usuario-previa" in contenido
+    assert "HF_API_KEY=hf-bundle-456" in contenido
+
+
+def test_extraer_secciones_y_pdf_consolidado():
+    import fitz
+    from PIL import Image
+    import prompts
+    import reporte_pdf
+
+    tiempo = np.arange(0, 600, 1.0)
+    fcf = 140.0 + 7.0 * np.sin(2 * np.pi * tiempo / 20.0)
+    features = clinical.extraer_features(_df(tiempo, fcf))
+    meta = {
+        "id": "caso01",
+        "fecha_hora": "2026-11-06 08:30",
+        "velocidad_papel_cm_min": 1.0,
+        "edad_gestacional": "39+2 sem",
+        "contexto_clinico": "Trabajo de parto fase activa",
+        "uso_oxitocina": "Sin oxitocina",
+        "profesional": "Mat. Prueba HGF",
+        "observaciones_clinicas": "Paciente en buen estado general, dinámica regular.",
+    }
+
+    inf_plantilla = prompts.generar_informe_plantilla(features, metadatos=meta)
+    assert "39+2 sem" in inf_plantilla
+    sec = prompts.extraer_secciones_informe(inf_plantilla)
+    assert set(sec.keys()) == {"1", "2", "3", "4"}
+    assert "140 lpm" in sec["1"]
+    assert "Categoría I" in sec["2"]
+
+    inf_llm_simulado = (
+        "#### 1. Parámetros Cardiotocográficos Extraídos\n"
+        "- Trazado reactivo con FCF basal en 140 lpm y variabilidad conservada.\n\n"
+        "#### 2. Clasificación Normativa (FIGO 2015 / NICE NG229)\n"
+        "- Categoría FIGO I (Normal), semáforo en verde.\n\n"
+        "#### 3. Correlación Fisiopatológica (Según Patrón Observado)\n"
+        "- Reserva autonómica fetal íntegra sin signos de hipoxia.\n\n"
+        "#### 4. Conducta Sugerida según Protocolo\n"
+        "- Mantener control obstétrico habitual. Requiere validación humana.\n"
+    )
+    sintesis = prompts.generar_sintesis_concordancia(features, inf_plantilla, inf_llm_simulado)
+    assert sintesis["estado"] == "alta"
+
+    overlay_dummy = Image.new("RGB", (600, 200), color=(255, 255, 255))
+
+    pdf_bytes = reporte_pdf.generar_pdf_consolidado(
+        features=features,
+        informe_plantilla=inf_plantilla,
+        informe_llm=inf_llm_simulado,
+        metadatos=meta,
+        overlay_img=overlay_dummy,
+        modelo_llm="google/gemma-4-31b-it:free",
+    )
+    assert pdf_bytes.startswith(b"%PDF")
+    doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+    assert len(doc) >= 1
+    texto_pdf = "\n".join(page.get_text() for page in doc)
+    assert "HOSPITAL DR. GUSTAVO FRICKE" in texto_pdf
+    assert "caso01" in texto_pdf
+    assert "39+2 sem" in texto_pdf
+    assert "Mat. Prueba HGF" in texto_pdf
+    assert "CATEGORÍA FIGO I" in texto_pdf
+    assert "Reserva autonómica fetal íntegra" in texto_pdf
+    doc.close()
+
+
+def test_sugerir_puntos_calibracion_filtra_numeros_ocr_inespecificos(monkeypatch):
+    import digitizer
+
+    gris = np.full((300, 600), 240, dtype=np.uint8)
+    panel = digitizer.LimitesPanel(0, 300)
+
+    # Simular OCR con un número espurio como 58: debe ser descartado y caer a valores estándar (100 y 0)
+    monkeypatch.setattr(
+        digitizer,
+        "_leer_etiquetas_eje",
+        lambda g, p, ancho_margen_frac=0.10: [(40.0, 100), (220.0, 58)],
+    )
+    sug = digitizer.sugerir_puntos_calibracion(gris, panel, valores_default=(100.0, 0.0))
+    assert sug is not None
+    assert sug[0][1] == 100.0
+    assert sug[1][1] == 0.0
+
+
+

@@ -63,7 +63,7 @@ uso, límites, privacidad): [docs/GUIA_PROFESIONALES.md](docs/GUIA_PROFESIONALES
   no técnicos existe `MEFI.bat` en la raíz (doble clic: crea venv si falta,
   instala dependencias la primera vez —marcador `venv\.listo`—, abre el
   navegador en :8501 y lanza streamlit).
-- Tests: `./venv/Scripts/python.exe -m pytest tests/ -q` (25/25 en verde hoy).
+- Tests: `./venv/Scripts/python.exe -m pytest tests/ -q` (28/28 en verde hoy).
 - `pytesseract` necesita `tesseract_cmd` apuntado a mano — no está en el PATH.
   En otra máquina: `winget install --id UB-Mannheim.TesseractOCR -e`.
 - Secretos en `.env` y `.streamlit/secrets.toml`, ambos gitignored. Nunca en
@@ -75,7 +75,8 @@ uso, límites, privacidad): [docs/GUIA_PROFESIONALES.md](docs/GUIA_PROFESIONALES
 |---|---|
 | `src/digitizer.py` | Imagen → serie de tiempo. Orientación, detección de paneles, calibración por 2 clics, huecos auditables. También OCR de cabecera y de anotaciones a mano (100% local). |
 | `src/clinical.py` | Reglas clínicas. Línea base, variabilidad, aceleraciones, desaceleraciones (precoz/tardía/variable), patrón sinusoidal, `clasificar_figo()`. Entrada única: `extraer_features(df)`. |
-| `src/prompts.py` | Importa los umbrales **directo de `clinical.py`** para que no se desincronicen. |
+| `src/prompts.py` | Importa los umbrales **directo de `clinical.py`** para que no se desincronicen. Incluye `generar_informe_plantilla()` (informe determinístico sin LLM) y `extraer_secciones_informe()` para alinear las 4 dimensiones clínicas entre plantilla y LLM. |
+| `src/reporte_pdf.py` | Genera el Reporte Clínico Consolidado en PDF A4 (`generar_pdf_consolidado()`) con PyMuPDF (`fitz.Story`), integrando encabezado institucional, KPIs/semáforo NICE, trazado digitalizado y cuadro comparativo lado a lado (Plantilla vs. IA). |
 | `src/llm_client.py` + `config.yaml` | Proveedor LLM 100% configurable por datos (Ollama / OpenRouter / Hugging Face). Agregar proveedor = agregar bloque en el YAML, sin tocar código. |
 | `src/app.py` | UI Streamlit. Exporta extracciones como `YYYY-MM-DD_<id-caso>_extraido.csv` (ID editable + fecha OCR; nunca el nombre del archivo subido). |
 | `src/rutas.py` | Rutas CWD-independientes (ancladas al archivo). En el bundle instalado, `MEFI_HOME` (`%LOCALAPPDATA%\\MEFI`, definido por `MEFI.bat`) concentra datos, `config.yaml` editable y `.env` — la app siembra ahí en la primera corrida; en desarrollo todo sigue en la raíz del repo. |

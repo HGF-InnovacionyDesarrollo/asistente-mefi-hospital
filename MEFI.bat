@@ -74,12 +74,9 @@ if errorlevel 1 (
     echo.
 )
 
-echo [3/3] Abriendo la aplicacion en el navegador...
+echo [3/3] Iniciando la aplicacion ^(la primera vez puede tardar 15-30 segundos; el navegador se abrira automaticamente al estar lista^)...
 set PYTHONIOENCODING=utf-8
-start "" http://localhost:8501
-%SystemRoot%\System32\timeout.exe /t 5 /nobreak >nul 2>&1
-if errorlevel 1 ping -n 6 127.0.0.1 >nul
-%RUNPY% -m streamlit run src\app.py --server.port 8501
+%RUNPY% -m streamlit run src\app.py --server.port 8501 --server.headless false
 
 echo.
 echo La aplicacion se cerro. Esta ventana puede cerrarse.

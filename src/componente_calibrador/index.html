@@ -1,0 +1,315 @@
+<!DOCTYPE html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Calibrador de Líneas MEFI</title>
+    <script src="./streamlit-component-lib.js"></script>
+    <style>
+      * {
+        box-sizing: border-box;
+      }
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        background: transparent;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        user-select: none;
+        -webkit-user-select: none;
+        overflow: hidden;
+      }
+      #wrapper {
+        position: relative;
+        width: 100%;
+        max-width: 1050px;
+        border: 1px solid #cbd5e1;
+        border-radius: 6px;
+        overflow: hidden;
+        background: #f8fafc;
+      }
+      #panel-img {
+        display: block;
+        width: 100%;
+        height: auto;
+        pointer-events: none;
+        user-select: none;
+        -webkit-user-drag: none;
+      }
+      .calib-line {
+        position: absolute;
+        left: 0;
+        right: 0;
+        height: 24px;
+        margin-top: -12px;
+        cursor: ns-resize;
+        z-index: 10;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 0 8px;
+        touch-action: none;
+      }
+      .calib-line::before {
+        content: "";
+        position: absolute;
+        left: 0;
+        right: 0;
+        top: 50%;
+        height: 3px;
+        transform: translateY(-50%);
+        box-shadow: 0 0 3px rgba(255, 255, 255, 0.95), 0 1px 4px rgba(0, 0, 0, 0.45);
+        transition: height 0.1s ease;
+      }
+      .calib-line:hover::before,
+      .calib-line.dragging::before {
+        height: 5px;
+      }
+      #line1::before {
+        background: #0066cc;
+      }
+      #line2::before {
+        background: #d91e18;
+      }
+      .handle-badge {
+        position: relative;
+        z-index: 2;
+        font-size: 12px;
+        font-weight: 700;
+        color: #ffffff;
+        padding: 3px 10px;
+        border-radius: 999px;
+        border: 1.5px solid #ffffff;
+        box-shadow: 0 2px 5px rgba(0, 0, 0, 0.35);
+        white-space: nowrap;
+        pointer-events: auto;
+        cursor: ns-resize;
+        letter-spacing: 0.2px;
+      }
+      #line1 .handle-badge {
+        background: #0066cc;
+      }
+      #line2 .handle-badge {
+        background: #d91e18;
+      }
+      .calib-line.dragging .handle-badge {
+        transform: scale(1.05);
+        box-shadow: 0 3px 8px rgba(0, 0, 0, 0.5);
+      }
+      #helper-bar {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 5px 10px;
+        font-size: 12px;
+        color: #334155;
+        background: #f1f5f9;
+        border-bottom: 1px solid #e2e8f0;
+      }
+      .helper-pill {
+        font-weight: 600;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="wrapper">
+      <div id="helper-bar">
+        <span class="helper-pill">🖱️ Arrastra con el mouse la línea azul y la línea roja hasta ubicarlas sobre dos líneas con número del papel</span>
+        <span id="status-coords" style="color:#475569;">Listo para arrastrar</span>
+      </div>
+      <div id="stage" style="position: relative; width: 100%;">
+        <img id="panel-img" alt="Panel CTG" />
+        <div id="line1" class="calib-line" title="Arrastra con el mouse hacia arriba o abajo">
+          <span class="handle-badge" id="badge1-left">↕ Punto 1</span>
+          <span class="handle-badge" id="badge1-right">↕ Arrastrar Línea 1</span>
+        </div>
+        <div id="line2" class="calib-line" title="Arrastra con el mouse hacia arriba o abajo">
+          <span class="handle-badge" id="badge2-left">↕ Punto 2</span>
+          <span class="handle-badge" id="badge2-right">↕ Arrastrar Línea 2</span>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      const wrapper = document.getElementById("wrapper");
+      const stage = document.getElementById("stage");
+      const img = document.getElementById("panel-img");
+      const line1 = document.getElementById("line1");
+      const line2 = document.getElementById("line2");
+      const badge1Left = document.getElementById("badge1-left");
+      const badge1Right = document.getElementById("badge1-right");
+      const badge2Left = document.getElementById("badge2-left");
+      const badge2Right = document.getElementById("badge2-right");
+      const statusCoords = document.getElementById("status-coords");
+
+      let lastImgSrc = null;
+      let lastSyncId = null;
+      let naturalHeight = 300;
+      // Posiciones en coordenadas de la imagen enviada (0 .. naturalHeight)
+      let y1Img = 60;
+      let y2Img = 240;
+      let activeDrag = null; // 1 o 2
+
+      function updateFrameHeight() {
+        const h = wrapper.offsetHeight;
+        if (h > 20) {
+          Streamlit.setFrameHeight(h + 8);
+        }
+      }
+
+      function renderLines() {
+        const renderedH = img.clientHeight || naturalHeight;
+        if (renderedH <= 0 || naturalHeight <= 0) return;
+        const scale = renderedH / naturalHeight;
+        const top1 = Math.max(2, Math.min(renderedH - 2, y1Img * scale));
+        const top2 = Math.max(2, Math.min(renderedH - 2, y2Img * scale));
+        line1.style.top = top1 + "px";
+        line2.style.top = top2 + "px";
+      }
+
+      function commitToStreamlit() {
+        statusCoords.textContent = "✓ Posición actualizada";
+        Streamlit.setComponentValue({
+          y1_px: Math.round(y1Img * 10) / 10,
+          y2_px: Math.round(y2Img * 10) / 10,
+          sync_id: lastSyncId,
+        });
+      }
+
+      function clientYToImgY(clientY) {
+        const rect = img.getBoundingClientRect();
+        const renderedH = rect.height || naturalHeight;
+        const relY = Math.max(0, Math.min(renderedH, clientY - rect.top));
+        return (relY / renderedH) * naturalHeight;
+      }
+
+      function startDrag(which, e) {
+        e.preventDefault();
+        e.stopPropagation();
+        activeDrag = which;
+        if (which === 1) line1.classList.add("dragging");
+        if (which === 2) line2.classList.add("dragging");
+        statusCoords.textContent =
+          which === 1 ? "Arrastrando Línea 1 (Azul)..." : "Arrastrando Línea 2 (Roja)...";
+      }
+
+      function moveDrag(clientY) {
+        if (!activeDrag) return;
+        const newY = clientYToImgY(clientY);
+        if (activeDrag === 1) {
+          y1Img = newY;
+        } else if (activeDrag === 2) {
+          y2Img = newY;
+        }
+        renderLines();
+      }
+
+      function endDrag() {
+        if (!activeDrag) return;
+        line1.classList.remove("dragging");
+        line2.classList.remove("dragging");
+        activeDrag = null;
+        commitToStreamlit();
+      }
+
+      line1.addEventListener("mousedown", (e) => startDrag(1, e));
+      line2.addEventListener("mousedown", (e) => startDrag(2, e));
+
+      window.addEventListener("mousemove", (e) => {
+        if (activeDrag) {
+          e.preventDefault();
+          moveDrag(e.clientY);
+        }
+      });
+
+      window.addEventListener("mouseup", () => {
+        if (activeDrag) {
+          endDrag();
+        }
+      });
+
+      // Soporte táctil
+      line1.addEventListener(
+        "touchstart",
+        (e) => {
+          if (e.touches.length > 0) startDrag(1, e);
+        },
+        { passive: false }
+      );
+      line2.addEventListener(
+        "touchstart",
+        (e) => {
+          if (e.touches.length > 0) startDrag(2, e);
+        },
+        { passive: false }
+      );
+      window.addEventListener(
+        "touchmove",
+        (e) => {
+          if (activeDrag && e.touches.length > 0) {
+            e.preventDefault();
+            moveDrag(e.touches[0].clientY);
+          }
+        },
+        { passive: false }
+      );
+      window.addEventListener("touchend", () => {
+        if (activeDrag) endDrag();
+      });
+
+      img.onload = function () {
+        renderLines();
+        updateFrameHeight();
+        setTimeout(updateFrameHeight, 60);
+      };
+
+      if (window.ResizeObserver) {
+        const ro = new ResizeObserver(() => {
+          renderLines();
+          updateFrameHeight();
+        });
+        ro.observe(wrapper);
+        ro.observe(img);
+      } else {
+        window.addEventListener("resize", () => {
+          renderLines();
+          updateFrameHeight();
+        });
+      }
+
+      function onRender(event) {
+        const args = event.detail.args || {};
+        if (args.img_height) {
+          naturalHeight = args.img_height;
+        }
+        if (args.label1) {
+          badge1Left.textContent = "↕ " + args.label1;
+          badge1Right.textContent = "↕ Arrastrar: " + args.label1;
+        }
+        if (args.label2) {
+          badge2Left.textContent = "↕ " + args.label2;
+          badge2Right.textContent = "↕ Arrastrar: " + args.label2;
+        }
+        // Solo sobrescribir la posición si es la carga inicial o si el usuario pidió restaurar
+        if (lastSyncId !== args.sync_id && !activeDrag) {
+          lastSyncId = args.sync_id;
+          if (typeof args.y1_px === "number") y1Img = args.y1_px;
+          if (typeof args.y2_px === "number") y2Img = args.y2_px;
+          renderLines();
+        }
+        if (args.img_src && args.img_src !== lastImgSrc) {
+          lastImgSrc = args.img_src;
+          img.src = args.img_src;
+        } else {
+          renderLines();
+          updateFrameHeight();
+        }
+      }
+
+      Streamlit.events.addEventListener(Streamlit.RENDER_EVENT, onRender);
+      Streamlit.setComponentReady();
+      updateFrameHeight();
+    </script>
+  </body>
+</html>
+

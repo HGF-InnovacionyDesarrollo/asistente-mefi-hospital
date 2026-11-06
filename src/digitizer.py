@@ -294,23 +294,31 @@ def _detectar_lineas_grilla(gris: np.ndarray, panel: LimitesPanel,
     return [int(p) for p in picos]
 
 
+VALORES_ESCALA_FCF = {30, 50, 60, 80, 90, 100, 120, 140, 150, 160, 180, 200, 210, 240}
+VALORES_ESCALA_UA = {0, 20, 25, 40, 50, 60, 75, 80, 100}
+
+
 def sugerir_puntos_calibracion(gris: np.ndarray, panel: LimitesPanel,
                                valores_default: tuple[float, float] = (210.0, 30.0)
                                ) -> list[tuple[float, float]] | None:
     """Sugerencia SEMI-AUTOMÁTICA de calibración: pre-rellena los dos puntos
-    para que el usuario solo tenga que VERIFICAR los valores, sin clics.
+    para que el usuario solo tenga que arrastrar las líneas con el mouse y
+    confirmar los números de escala en las casillas inferiores.
 
     Estrategia en dos niveles (mejor esfuerzo):
-    1. OCR de las etiquetas del margen izquierdo: si leyó >=2 números con
-       relación monótona consistente, se usan las dos lecturas más separadas —
-       posiciones y valores reales del papel.
+    1. OCR de las etiquetas del margen izquierdo filtrado ESTRICTAMENTE a
+       múltiplos válidos de papel CTG (evita números espurios como '58'):
+       si leyó >=2 números válidos con relación monótona consistente, se usan
+       las dos lecturas más separadas.
     2. Si no, detección de las líneas de grilla superior e inferior, con los
-       valores por defecto del tipo de panel (el usuario confirma/corrige).
+       valores estándar por defecto del tipo de panel (el usuario arrastra la
+       línea con el mouse y confirma el número abajo).
 
     Nunca calibra por sí sola: la decisión consciente del 11-ago-2026 de exigir
-    confirmación humana de la escala se mantiene; esto solo quita los clics.
+    confirmación humana de la escala se mantiene.
     """
-    puntos = _leer_etiquetas_eje(gris, panel)
+    valores_validos = VALORES_ESCALA_FCF if valores_default[0] > 120 else VALORES_ESCALA_UA
+    puntos = [(y, v) for (y, v) in _leer_etiquetas_eje(gris, panel) if v in valores_validos]
     if len(puntos) >= 2:
         puntos = sorted(puntos)
         mejor = None
@@ -335,7 +343,11 @@ def sugerir_puntos_calibracion(gris: np.ndarray, panel: LimitesPanel,
             (float(lineas[0] + panel.y0), float(valores_default[0])),
             (float(lineas[-1] + panel.y0), float(valores_default[1])),
         ]
-    return None
+    alto = max(1, panel.y1 - panel.y0)
+    return [
+        (float(panel.y0 + alto * 0.20), float(valores_default[0])),
+        (float(panel.y0 + alto * 0.80), float(valores_default[1])),
+    ]
 
 
 def _calibrar_eje_manual(panel: LimitesPanel, rango_valor: tuple[float, float]) -> CalibracionEje:

@@ -48,7 +48,9 @@ def ruta_lectura(rel: str) -> Path:
 
 def sembrar_home() -> None:
     """Primera corrida en modo instalado: copia config.yaml y .env plantilla
-    y crea data/. Idempotente; en desarrollo no hace nada."""
+    y crea data/. Si .env ya existía en MEFI_HOME pero le faltan claves que sí
+    vienen en el .env del bundle, las completa sin pisar las del usuario.
+    Idempotente; en desarrollo no hace nada."""
     if HOME is None:
         return
     HOME.mkdir(parents=True, exist_ok=True)
@@ -57,5 +59,32 @@ def sembrar_home() -> None:
         destino = HOME / rel
         if plantilla.exists() and not destino.exists():
             shutil.copy2(plantilla, destino)
+        elif rel == ".env" and plantilla.exists() and destino.exists():
+            _completar_env(plantilla, destino)
     for rel in ("data/extracted", "data/tmp"):
         (HOME / rel).mkdir(parents=True, exist_ok=True)
+
+
+def _completar_env(plantilla: Path, destino: Path) -> None:
+    """Agrega en `destino` cualquier variable definida en `plantilla` que aún no
+    esté presente (o esté vacía) en `destino`."""
+    existentes: dict[str, str] = {}
+    lineas_destino = destino.read_text(encoding="utf-8").splitlines()
+    for linea in lineas_destino:
+        s = linea.strip()
+        if s and not s.startswith("#") and "=" in s:
+            k, v = s.split("=", 1)
+            existentes[k.strip()] = v.strip()
+
+    nuevas: list[str] = []
+    for linea in plantilla.read_text(encoding="utf-8").splitlines():
+        s = linea.strip()
+        if s and not s.startswith("#") and "=" in s:
+            k, v = s.split("=", 1)
+            k, v = k.strip(), v.strip()
+            if v and not existentes.get(k):
+                nuevas.append(f"{k}={v}")
+
+    if nuevas:
+        texto = "\n".join(lineas_destino + nuevas) + "\n"
+        destino.write_text(texto, encoding="utf-8")
