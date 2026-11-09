@@ -90,6 +90,11 @@ def generar_pdf_consolidado(
     eg_reg = html.escape(str(meta.get("edad_gestacional") or "No especificada"))
     ctx_reg = html.escape(str(meta.get("contexto_clinico") or "No especificado"))
     oxi_reg = html.escape(str(meta.get("uso_oxitocina") or "No especificado"))
+    mec_reg = html.escape(str(meta.get("meconio") or "No especificado"))
+    pat_reg = html.escape(str(meta.get("patologia_antenatal") or "No reportada"))
+    comp_reg = html.escape(
+        str(meta.get("comparacion_mefi_previos") or "Pendiente contrastar con MEFI previos del caso (Protocolo V2)")
+    )
     prof_reg = html.escape(str(meta.get("profesional") or ""))
     obs_reg = html.escape(str(meta.get("observaciones_clinicas") or "")).replace("\n", "<br/>")
 
@@ -197,6 +202,7 @@ def generar_pdf_consolidado(
         <div class="meta-table">
             <p><b>ID Registro:</b> {id_reg} &nbsp;·&nbsp; <b>Fecha/Hora Trazado:</b> {fecha_reg} &nbsp;·&nbsp; <b>Velocidad Papel:</b> {vel_reg} cm/min &nbsp;·&nbsp; <b>Emisión:</b> {ahora_str}</p>
             <p><b>Edad Gestacional:</b> {eg_reg} &nbsp;·&nbsp; <b>Contexto Clínico:</b> {ctx_reg} &nbsp;·&nbsp; <b>Uso de Oxitocina:</b> {oxi_reg} &nbsp;·&nbsp; <b>Evaluador:</b> {prof_reg if prof_reg else "Por firmar"}</p>
+            <p><b>Meconio:</b> {mec_reg} &nbsp;·&nbsp; <b>Patología Antenatal:</b> {pat_reg} &nbsp;·&nbsp; <b>Comparación MEFI previos:</b> {comp_reg}</p>
         </div>
 
         <div class="cat-banner" style="background-color:{bg_cat}; color:{fg_cat};">

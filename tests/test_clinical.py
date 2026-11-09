@@ -461,4 +461,490 @@ def test_sugerir_puntos_calibracion_filtra_numeros_ocr_inespecificos(monkeypatch
     assert sug[1][1] == 0.0
 
 
+def test_validar_estado_calibracion_seguridad():
+    import ux_helpers
+
+    # Caso válido: y1=50 (arriba) con valor 210, y2=250 (abajo) con valor 30
+    ok = ux_helpers.validar_estado_calibracion(50.0, 210.0, 250.0, 30.0)
+    assert ok["valido"] is True
+    assert ok["codigo"] == "ok"
+
+    # Error 1: valores iguales
+    ig = ux_helpers.validar_estado_calibracion(50.0, 150.0, 250.0, 150.0)
+    assert ig["valido"] is False
+    assert ig["codigo"] == "valores_iguales"
+
+    # Error 2: líneas demasiado juntas (<15 px)
+    juntas = ux_helpers.validar_estado_calibracion(100.0, 210.0, 108.0, 30.0)
+    assert juntas["valido"] is False
+    assert juntas["codigo"] == "lineas_muy_juntas"
+
+    # Error 3: escala invertida (valor menor arriba y valor mayor abajo)
+    inv = ux_helpers.validar_estado_calibracion(50.0, 30.0, 250.0, 210.0)
+    assert inv["valido"] is False
+    assert inv["codigo"] == "escala_invertida"
+
+
+def test_calcular_calidad_lectura_y_tabla_desaceleraciones():
+    import ux_helpers
+
+    tiempo = np.arange(0, 600, 1.0)
+    fcf = np.full(len(tiempo), 140.0)
+    confiable = np.ones(len(tiempo), dtype=bool)
+    confiable[:60] = False  # 10% interpolado, 90% lectura directa
+    df = _df(tiempo, fcf, fcf_confiable=confiable)
+
+    calidad = ux_helpers.calcular_calidad_lectura(df)
+    assert calidad["nivel"] == "alta"
+    assert calidad["pct_fcf_directa"] == 90.0
+    assert calidad["pct_interpolado"] == 10.0
+
+    eventos = [
+        {
+            "t_inicio_s": 125.0,
+            "t_fin_s": 170.0,
+            "duracion_s": 45.0,
+            "amplitud_max_lpm": 28.0,
+            "tipo": "tardia",
+            "muy_prolongada": False,
+        }
+    ]
+    tabla = ux_helpers.formatear_tabla_desaceleraciones(eventos)
+    assert len(tabla) == 1
+    assert tabla[0]["Inicio (mm:ss)"] == "02:05"
+    assert tabla[0]["Caída máx. (lpm)"] == "-28 lpm"
+    assert "Tardía" in tabla[0]["Clasificación"]
+    assert tabla[0]["Alerta prolongada (>3 min)"] == "🟢 No"
+
+
+def test_generar_imagen_ctg_demo_end_to_end():
+    import digitizer
+    import ux_helpers
+
+    png_bytes = ux_helpers.generar_imagen_ctg_demo()
+    assert png_bytes.startswith(b"\x89PNG")
+    prep = digitizer.preparar_imagen(png_bytes)
+    assert prep.panel_fcf.y1 > prep.panel_fcf.y0
+    assert prep.panel_ua.y1 > prep.panel_ua.y0
+
+
+# --------------------------------------------------------------------------
+# Fase A (MEFI v2.0): Alineación normativa Protocolo V2 + ACOG CPG No. 10
+# --------------------------------------------------------------------------
+
+
+def test_fase_a1_conducta_protocolo_v2_y_acog_cat_ii():
+    import prompts
+
+    # Trazado Categoría II (taquicardia moderada 170 lpm con variabilidad normal)
+    tiempo = np.arange(0, 600, 1.0)
+    fcf = 170.0 + 6.0 * np.sin(2 * np.pi * tiempo / 20.0)
+    features = clinical.extraer_features(_df(tiempo, fcf))
+    assert features["figo"]["categoria"] == "II"
+
+    inf = prompts.generar_informe_plantilla(features)
+    assert "aviso inmediato al médico/a ginecobstetra residente de turno" in inf
+    assert "Amnioinfusión" in inf
+    assert "SatO2 < 94 %" in inf
+    assert "nitroglicerina / fenoterol" in inf
+    assert "terbutalina" in inf
+    assert "½ a 1 hora" in inf
+    assert "Box 3 ACOG" in inf
+
+
+def test_fase_a1_conducta_protocolo_v2_y_acog_cat_iii():
+    import prompts
+
+    tiempo = np.arange(0, 1200, 1.0)
+    fcf = 130.0 + 8.0 * np.sin(2 * np.pi * tiempo * (4.0 / 60.0))
+    features = clinical.extraer_features(_df(tiempo, fcf))
+    assert features["figo"]["categoria"] == "III"
+
+    inf = prompts.generar_informe_plantilla(features)
+    assert "rotura uterina" in inf
+    assert "tocolisis de acción rápida" in inf
+    assert "10 minutos" in inf
+    assert "interrupción expedita" in inf
+
+
+def test_fase_a2_subclasificador_riesgo_cat_ii_alto():
+    # Taquicardia 170 lpm -> rasgo de alto riesgo Box 3 ACOG
+    tiempo = np.arange(0, 600, 1.0)
+    fcf = 170.0 + 6.0 * np.sin(2 * np.pi * tiempo / 20.0)
+    features = clinical.extraer_features(_df(tiempo, fcf))
+    riesgo = features["riesgo_categoria_ii"]
+    assert riesgo["aplicable"] is True
+    assert riesgo["nivel"] == "alto"
+    assert any("Taquicardia" in r for r in riesgo["rasgos_alto_riesgo"])
+
+
+def test_fase_a2_subclasificador_riesgo_cat_ii_protector():
+    # Categoría II solo por taquisistolia, pero con variabilidad moderada y aceleración reactiva
+    tiempo = np.arange(0, 660, 0.25)
+    fcf = 140.0 + 6.0 * np.sin(2 * np.pi * tiempo / 20.0)
+    fcf[(tiempo >= 200) & (tiempo <= 230)] = 162.0  # 1 aceleración de 30s
+    ua = np.full(len(tiempo), 15.0)
+    for i in range(6):
+        t_pico = 100.0 + i * 95.0
+        ua += 40.0 * np.exp(-0.5 * ((tiempo - t_pico) / 20.0) ** 2)
+    features = clinical.extraer_features(_df(tiempo, fcf, ua=ua))
+    assert features["figo"]["categoria"] == "II"
+    riesgo = features["riesgo_categoria_ii"]
+    assert riesgo["nivel"] == "con rasgos protectores"
+    assert len(riesgo["rasgos_protectores"]) >= 1
+
+
+def test_fase_a3_sospecha_fcf_materna_positiva():
+    # 2 aceleraciones cuyos centros coinciden exactamente con 2 picos de contracción
+    features_mock = {
+        "aceleraciones": [
+            {"inicio_s": 190.0, "fin_s": 215.0, "duracion_s": 25.0, "amplitud_max_lpm": 20.0},
+            {"inicio_s": 490.0, "fin_s": 515.0, "duracion_s": 25.0, "amplitud_max_lpm": 22.0},
+        ],
+        "picos_contracciones_s": [200.0, 500.0],
+    }
+    res = clinical.detectar_sospecha_fcf_materna(features_mock)
+    assert res["sospecha"] is True
+    assert res["coincidencias"] == 2
+    assert "pulsioxímetro" in res["mensaje"]
+
+
+def test_fase_a3_sospecha_fcf_materna_negativa():
+    features_mock = {
+        "aceleraciones": [
+            {"inicio_s": 100.0, "fin_s": 120.0, "duracion_s": 20.0, "amplitud_max_lpm": 18.0},
+        ],
+        "picos_contracciones_s": [350.0, 650.0],
+    }
+    res = clinical.detectar_sospecha_fcf_materna(features_mock)
+    assert res["sospecha"] is False
+    assert res["mensaje"] is None
+
+
+def test_fase_a4_disclaimer_regulador_acog_infant():
+    import prompts
+
+    assert "v2.0" in prompts.VERSION_PROMPT
+    assert "ACOG CPG No. 10" in prompts.SYSTEM_INSTRUCTIONS
+    assert "INFANT" in prompts.SYSTEM_INSTRUCTIONS
+
+    tiempo = np.arange(0, 600, 1.0)
+    fcf = 140.0 + 7.0 * np.sin(2 * np.pi * tiempo / 20.0)
+    features = clinical.extraer_features(_df(tiempo, fcf))
+    inf = prompts.generar_informe_plantilla(features)
+    assert "ACOG CPG No. 10 recomienda en contra de depender primariamente de sistemas computarizados" in inf
+    assert "INFANT" in inf
+
+
+def test_fase_a5_acog_estricta_difiere_de_mefi_en_prolongada_aislada():
+    # Desaceleración muy prolongada (>=5 min) pero con variabilidad moderada conservada (no sinusoidal):
+    # MEFI = Cat III (por desacel >=5 min); ACOG estricta = Cat II (porque variabilidad no es ausente ni hay sinusoidal)
+    tiempo, fcf = _trazado_plano(duracion_s=900, basal=140.0, ruido=3.5, semilla=10)
+    fcf = fcf.copy()
+    fcf[100:420] = 115.0  # 320s (>5 min) a -25 lpm
+    features = clinical.extraer_features(_df(tiempo, fcf))
+    assert features["patron_sinusoidal"]["presente"] is False
+    assert features["figo"]["categoria"] == "III"
+    acog = features["acog_estricta"]
+    assert acog["categoria"] == "II"
+    assert acog["difiere_de_mefi"] is True
+    assert "MEFI clasifica en Categoría III" in acog["nota_comparativa"]
+
+
+def test_fase_a5_acog_estricta_concordante_en_sinusoidal_y_variabilidad_ausente():
+    # Sinusoidal -> ambos clasifican en Categoría III
+    tiempo = np.arange(0, 1200, 1.0)
+    fcf = 130.0 + 8.0 * np.sin(2 * np.pi * tiempo * (4.0 / 60.0))
+    features = clinical.extraer_features(_df(tiempo, fcf))
+    assert features["figo"]["categoria"] == "III"
+    assert features["acog_estricta"]["categoria"] == "III"
+    assert features["acog_estricta"]["difiere_de_mefi"] is False
+
+
+# --------------------------------------------------------------------------
+# Fase B (MEFI v2.0): Definiciones NICHD/ACOG y validación de umbrales
+# --------------------------------------------------------------------------
+
+
+def test_fase_b1_desaceleracion_prolongada_120s():
+    # Desaceleración de 135s (>=120s y <180s): debe marcar prolongada=True y muy_prolongada=False
+    tiempo = np.arange(0, 360, 1.0)
+    fcf = np.full(len(tiempo), 140.0)
+    fcf[60:196] = 115.0  # 135s de duración
+    eventos = clinical.detectar_desaceleraciones(_df(tiempo, fcf), basal=140.0)
+    assert len(eventos) == 1
+    assert eventos[0]["prolongada"] is True
+    assert eventos[0]["muy_prolongada"] is False
+
+
+def test_fase_b2_patron_sinusoidal_20_min():
+    # 12 min (720s) no alcanza los 20 min (1200s) exigidos por ACOG Tabla 1
+    t_12m = np.arange(0, 720, 1.0)
+    fcf_12m = 130.0 + 8.0 * np.sin(2 * np.pi * t_12m * (4.0 / 60.0))
+    res_12m = clinical.detectar_patron_sinusoidal(_df(t_12m, fcf_12m))
+    assert res_12m["presente"] is False
+    assert "20 minutos" in res_12m["motivo"]
+
+    # 20 min (1200s) sí alcanza el umbral ACOG y expone duración + nota Protocolo V2 (>30 min)
+    t_20m = np.arange(0, 1200, 1.0)
+    fcf_20m = 130.0 + 8.0 * np.sin(2 * np.pi * t_20m * (4.0 / 60.0))
+    res_20m = clinical.detectar_patron_sinusoidal(_df(t_20m, fcf_20m))
+    assert res_20m["presente"] is True
+    assert res_20m["duracion_evaluada_min"] == 20.0
+    assert res_20m["cumple_30min_protocolo_v2"] is False
+    assert "30 min" in res_20m["nota_protocolo_v2"]
+
+
+def test_fase_b3_aceleraciones_por_edad_gestacional_y_prolongada():
+    tiempo = np.arange(0, 400, 1.0)
+    fcf = np.full(len(tiempo), 135.0)
+    # Evento 1: +12 lpm durante 12s (cumple 10x10 de <32 sem, pero NO cumple 15x15 a término)
+    fcf[40:53] = 147.0
+    # Evento 2: +20 lpm durante 150s (2.5 min -> aceleración prolongada en ambas edades)
+    fcf[120:271] = 155.0
+    df = _df(tiempo, fcf)
+
+    ac_termino = clinical.detectar_aceleraciones(df, basal=135.0, edad_gestacional_sem="39+2 sem")
+    assert len(ac_termino) == 1
+    assert ac_termino[0]["prolongada"] is True
+    assert ac_termino[0]["etiqueta"] == "aceleración prolongada"
+
+    ac_pret = clinical.detectar_aceleraciones(df, basal=135.0, edad_gestacional_sem="30+4 sem")
+    assert len(ac_pret) == 2
+    assert ac_pret[0]["prolongada"] is False
+    assert ac_pret[0]["criterio_lpm_s"] == "10x10"
+    assert ac_pret[1]["prolongada"] is True
+
+
+def test_fase_b4_taquisistolia_ventana_30m_y_respaldo():
+    # Caso 1: registro de 60 min (3600s) donde los primeros 30 min tienen 16 contracciones (5.3/10 min > 5)
+    # y los últimos 30 min tienen 0 contracciones (tasa global = 16/6 = 2.7/10 min < 5, pero ventana 30m = 5.3 > 5)
+    picos_30m = [100.0 + i * 105.0 for i in range(16)]
+    res_30m = clinical._calcular_taquisistolia_ventana_30m(picos_30m, 0.0, 3600.0)
+    assert res_30m["evaluada_30m"] is True
+    assert res_30m["por_10min_ventana_30m"] == 5.3
+    assert res_30m["tachisistolia_acog_30m"] is True
+
+    # Caso 2: registro corto (<30 min, 660s) -> evaluada_30m es False, opera respaldo global
+    res_corto = clinical._calcular_taquisistolia_ventana_30m([100.0, 200.0, 300.0], 0.0, 660.0)
+    assert res_corto["evaluada_30m"] is False
+    assert res_corto["por_10min_ventana_30m"] is None
+
+
+def test_fase_b5_variabilidad_4_categorias_nichd():
+    tiempo = np.arange(0, 300, 1.0)
+
+    # 1. Ausente (<1.0 lpm)
+    v_aus = clinical.calcular_variabilidad(_df(tiempo, np.full(len(tiempo), 140.0)), basal=140.0)
+    assert v_aus["categoria"] == "reducida"
+    assert v_aus["categoria_nichd"] == "ausente"
+
+    # 2. Mínima (1.0 a 5.0 lpm -> oscilación pico-a-pico ~3.0 lpm)
+    fcf_min = 140.0 + 1.5 * np.sin(2 * np.pi * tiempo / 20.0)
+    v_min = clinical.calcular_variabilidad(_df(tiempo, fcf_min), basal=140.0)
+    assert v_min["categoria"] == "reducida"
+    assert v_min["categoria_nichd"] == "minima"
+
+    # 3. Moderada (6 a 25 lpm -> oscilación pico-a-pico ~12 lpm)
+    fcf_mod = 140.0 + 6.0 * np.sin(2 * np.pi * tiempo / 20.0)
+    v_mod = clinical.calcular_variabilidad(_df(tiempo, fcf_mod), basal=140.0)
+    assert v_mod["categoria"] == "normal"
+    assert v_mod["categoria_nichd"] == "moderada"
+
+    # 4. Marcada (>25 lpm -> oscilación pico-a-pico ~36 lpm)
+    fcf_marc = 140.0 + 18.0 * np.sin(2 * np.pi * tiempo / 20.0)
+    v_marc = clinical.calcular_variabilidad(_df(tiempo, fcf_marc), basal=140.0)
+    assert v_marc["categoria"] == "aumentada"
+    assert v_marc["categoria_nichd"] == "marcada"
+
+
+def test_fase_b6_variabilidad_intra_desaceleracion():
+    tiempo = np.arange(0, 400, 1.0)
+    fcf_plana = np.full(len(tiempo), 140.0)
+    # Desaceleración prolongada (150s >= 120s) con fondo casi plano (<5 lpm)
+    fcf_plana[80:231] = 100.0 + 0.5 * np.sin(2 * np.pi * tiempo[80:231] / 10.0)
+    ev_plana = clinical.detectar_desaceleraciones(_df(tiempo, fcf_plana), basal=140.0)
+    assert len(ev_plana) == 1
+    assert ev_plana[0]["prolongada"] is True
+    assert ev_plana[0]["variabilidad_reducida_intra_evento"] is True
+    assert ev_plana[0]["variabilidad_intra_lpm"] < 5.0
+
+    # Desaceleración prolongada (150s >= 120s) con variabilidad conservada intra-evento (~12 lpm pico-a-pico)
+    fcf_osc = np.full(len(tiempo), 140.0)
+    fcf_osc[80:231] = 100.0 + 6.0 * np.sin(2 * np.pi * tiempo[80:231] / 8.0)
+    ev_osc = clinical.detectar_desaceleraciones(_df(tiempo, fcf_osc), basal=140.0)
+    assert len(ev_osc) == 1
+    assert ev_osc[0]["prolongada"] is True
+    assert ev_osc[0]["variabilidad_reducida_intra_evento"] is False
+    assert ev_osc[0]["variabilidad_intra_lpm"] >= 5.0
+
+
+# --------------------------------------------------------------------------
+# Fase C (MEFI v2.0): Criterios «60», Tipificación de Hipoxia, Contexto y Tabla UI
+# --------------------------------------------------------------------------
+
+
+def test_fase_c1_criterios_60_desaceleraciones_variables():
+    # Dos desaceleraciones variables con >=2 criterios «60» (duración >60s, nadir <60 lpm, caída >60 lpm)
+    # separadas por >30 min (1800s) -> alerta_activa = True
+    eventos = [
+        {
+            "inicio_s": 100.0,
+            "fin_s": 175.0,
+            "duracion_s": 75.0,  # >60s (1)
+            "nadir_lpm": 55.0,   # <60 lpm (2)
+            "amplitud_max_lpm": 85.0,  # >60 lpm (3)
+            "tipo": "variable",
+        },
+        {
+            "inicio_s": 2000.0,
+            "fin_s": 2070.0,
+            "duracion_s": 70.0,  # >60s (1)
+            "nadir_lpm": 68.0,
+            "amplitud_max_lpm": 72.0,  # >60 lpm (2)
+            "tipo": "variable",
+        },
+    ]
+    res = clinical.evaluar_criterios_60(eventos)
+    assert res["alerta_activa"] is True
+    assert res["num_eventos_dos_o_mas_criterios"] == 2
+    assert res["lapso_persistencia_min"] > 30.0
+    assert "ACTIVO" in res["resumen"]
+
+
+def test_fase_c2_tipificacion_hipoxia_cuatro_subtipos():
+    # 1. Aguda: desaceleración >3 min (200s) con variabilidad reducida intra-evento
+    f_aguda = {
+        "linea_base": 140.0,
+        "variabilidad": {"categoria": "normal", "amplitud_media_lpm": 10.0},
+        "aceleraciones": [],
+        "desaceleraciones": [
+            {
+                "inicio_s": 50.0,
+                "fin_s": 250.0,
+                "duracion_s": 200.0,
+                "muy_prolongada": False,
+                "variabilidad_reducida_intra_evento": True,
+                "tipo": "variable",
+            }
+        ],
+    }
+    res_ag = clinical.tipificar_hipoxia(f_aguda)
+    assert res_ag["tipo"] == "Aguda"
+    assert res_ag["activa"] is True
+
+    # 2. Subaguda: >50% del tiempo total desacelerando (360s de 600s)
+    f_sub = {
+        "linea_base": 140.0,
+        "variabilidad": {"categoria": "normal", "amplitud_media_lpm": 10.0},
+        "aceleraciones": [],
+        "desaceleraciones": [
+            {"inicio_s": 20.0, "fin_s": 140.0, "duracion_s": 120.0, "tipo": "variable"},
+            {"inicio_s": 200.0, "fin_s": 320.0, "duracion_s": 120.0, "tipo": "variable"},
+            {"inicio_s": 380.0, "fin_s": 500.0, "duracion_s": 120.0, "tipo": "variable"},
+        ],
+    }
+    res_sub = clinical.tipificar_hipoxia(f_sub)
+    assert res_sub["tipo"] == "Subaguda"
+    assert res_sub["activa"] is True
+
+    # 3. Progresiva: sin aceleraciones + desaceleraciones repetitivas + taquicardia (165 lpm)
+    f_prog = {
+        "linea_base": 165.0,
+        "variabilidad": {"categoria": "normal", "amplitud_media_lpm": 8.0},
+        "aceleraciones": [],
+        "desaceleraciones": [
+            {"inicio_s": 100.0, "fin_s": 145.0, "duracion_s": 45.0, "tipo": "tardia"},
+            {"inicio_s": 300.0, "fin_s": 345.0, "duracion_s": 45.0, "tipo": "tardia"},
+            {"inicio_s": 500.0, "fin_s": 545.0, "duracion_s": 45.0, "tipo": "tardia"},
+        ],
+    }
+    res_prog = clinical.tipificar_hipoxia(f_prog)
+    assert res_prog["tipo"] == "Progresiva"
+    assert res_prog["activa"] is True
+
+    # 4. Crónica: línea base en límite alto (155 lpm) + variabilidad reducida + sin aceleraciones
+    f_cron = {
+        "linea_base": 155.0,
+        "variabilidad": {"categoria": "reducida", "amplitud_media_lpm": 3.0},
+        "aceleraciones": [],
+        "desaceleraciones": [],
+    }
+    res_cron = clinical.tipificar_hipoxia(f_cron)
+    assert res_cron["tipo"] == "Crónica"
+    assert res_cron["activa"] is True
+
+
+def test_fase_c3_c4_contexto_estructurado_y_tabla_ui():
+    import fitz
+    import prompts
+    import reporte_pdf
+    import ux_helpers
+
+    tiempo = np.arange(0, 600, 1.0)
+    fcf = 140.0 + 7.0 * np.sin(2 * np.pi * tiempo / 20.0)
+    features = clinical.extraer_features(_df(tiempo, fcf), edad_gestacional_sem="39+1 sem")
+    meta = {
+        "id": "caso_c3",
+        "fecha_hora": "2026-11-09 10:00",
+        "velocidad_papel_cm_min": 1.0,
+        "edad_gestacional": "39+1 sem",
+        "contexto_clinico": "Trabajo de parto fase activa",
+        "uso_oxitocina": "En conducción con oxitocina",
+        "meconio": "Sí (meconio presente)",
+        "patologia_antenatal": "RCIU estadio I",
+        "comparacion_mefi_previos": "Descenso de variabilidad respecto a MEFI de hace 2h",
+    }
+
+    prompt_usr = prompts.construir_prompt_usuario(features, metadatos=meta)
+    assert "Sí (meconio presente)" in prompt_usr
+    assert "RCIU estadio I" in prompt_usr
+    assert "Descenso de variabilidad respecto a MEFI de hace 2h" in prompt_usr
+
+    inf_plantilla = prompts.generar_informe_plantilla(features, metadatos=meta)
+    assert "Sí (meconio presente)" in inf_plantilla
+    assert "RCIU estadio I" in inf_plantilla
+    assert "Descenso de variabilidad respecto a MEFI de hace 2h" in inf_plantilla
+
+    pdf_bytes = reporte_pdf.generar_pdf_consolidado(
+        features=features,
+        informe_plantilla=inf_plantilla,
+        metadatos=meta,
+    )
+    doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+    texto_pdf = "\n".join(page.get_text() for page in doc)
+    doc.close()
+    assert "RCIU estadio I" in texto_pdf
+    assert "meconio presente" in texto_pdf
+
+    # Verificar columnas C4 en tabla de desaceleraciones
+    filas = ux_helpers.formatear_tabla_desaceleraciones([
+        {
+            "inicio_s": 60.0,
+            "fin_s": 195.0,
+            "duracion_s": 135.0,
+            "nadir_lpm": 55.0,
+            "amplitud_max_lpm": 80.0,
+            "tipo": "variable",
+            "prolongada": True,
+            "muy_prolongada": False,
+            "variabilidad_intra_lpm": 2.4,
+            "variabilidad_reducida_intra_evento": True,
+        }
+    ])
+    assert len(filas) == 1
+    assert "3/3" in filas[0]["Criterios «60» (Variables)"]
+    assert "Reducida" in filas[0]["Variabilidad intra-evento (≥2 min)"]
+    assert "Prolongada (≥2 min)" in filas[0]["Alerta prolongada (≥2 min)"]
+
+
+
+
+
+
+
+
+
+
+
 

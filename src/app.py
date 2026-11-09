@@ -21,6 +21,7 @@ import clinical
 import prompts
 import reporte_pdf
 import rutas
+import ux_helpers
 from digitizer import (
     calibrar_desde_dos_puntos,
     detectar_anotaciones_clinicas,
@@ -44,18 +45,19 @@ st.set_page_config(page_title="Asesor Clínico MEFI", layout="wide")
 st.title("Asesor Clínico MEFI - Hospital Gustavo Fricke")
 
 st.warning(
-    "**Este sistema es una ayuda diagnóstica, no un diagnóstico.** La clasificación FIGO/NICE "
-    "y el informe generado no reemplazan el juicio clínico ni la evaluación directa del "
-    "paciente. Precisión de clasificación no implica beneficio clínico demostrado: el ensayo "
-    "INFANT (Lancet, 2017) mostró que un sistema de apoyo a la decisión en CTG con alta "
-    "precisión de clasificación no mejoró los desenlaces neonatales. Este MVP usa una "
-    "simplificación de FIGO 2015 / NICE NG229 y no está validado en la población del "
-    "Hospital Gustavo Fricke.",
+    "**Este sistema es una ayuda diagnóstica, no un diagnóstico.** La clasificación FIGO/NICE/ACOG "
+    "y el informe generado requieren **confirmación humana obligatoria** y no reemplazan el juicio clínico "
+    "ni la evaluación directa de la paciente. **ACOG Clinical Practice Guideline No. 10 (Obstet Gynecol "
+    "2025;146:583–599)** recomienda **en contra de depender primariamente de sistemas computarizados** "
+    "para interpretar y manejar la FCF (*recomendación fuerte, evidencia de calidad moderada*), en línea "
+    "con el ensayo **INFANT (Lancet, 2017)**, que demostró que una alta precisión de clasificación "
+    "computarizada en CTG no mejoró por sí sola los desenlaces neonatales. Este sistema no está validado "
+    "prospectivamente en la población del Hospital Dr. Gustavo Fricke.",
     icon="⚠️",
 )
 
-# --- BARRA LATERAL: SELECTOR DINÁMICO DE ENTORNO ---
-st.sidebar.header("⚙️ Configuración de Inferencia")
+# --- BARRA LATERAL: MODO CLÍNICO LIMPIO + PANEL TÉCNICO COLAPSABLE (BLOQUE C) ---
+st.sidebar.header("🏥 Estado del Sistema")
 
 
 def cargar_config_app():
@@ -101,49 +103,59 @@ indice_activo = (
     else 0
 )
 
-etiqueta_elegida = st.sidebar.radio(
-    "Selecciona el Entorno de Ejecución:",
-    options=etiquetas_proveedores,
-    index=indice_activo,
-)
-prov_key = claves_proveedores[etiquetas_proveedores.index(etiqueta_elegida)]
-prov_config = proveedores[prov_key]
-
-base_url = prov_config["base_url"]
-modelos_texto_disponibles = prov_config.get("text_models") or prov_config.get("vision_models", [])
-modelo_seleccionado = st.sidebar.selectbox(
-    "Modelo de texto (informe clínico):",
-    modelos_texto_disponibles,
-    index=modelos_texto_disponibles.index(prov_config["model"])
-    if prov_config.get("model") in modelos_texto_disponibles
-    else 0,
+prov_activo_cfg = proveedores.get(claves_proveedores[indice_activo], {})
+falta_key_inicial = bool(
+    prov_activo_cfg.get("needs_api_key", False)
+    and not os.getenv(prov_activo_cfg.get("api_key_env", ""))
 )
 
-api_key = None
-if prov_config.get("needs_api_key", False):
-    api_key_env = prov_config.get("api_key_env")
-    api_key = os.getenv(api_key_env)
-    if not api_key:
-        st.sidebar.warning(f"⚠️ Falta {api_key_env} para usar {prov_config.get('label', prov_key)}.")
-        with st.sidebar.expander("Ingresar API key", expanded=True):
+st.sidebar.info("📋 **Motor Clínico Determinístico:** Activo (FIGO 2015 / NICE NG229)")
+
+with st.sidebar.expander("🔧 Configuración técnica de IA (Avanzado)", expanded=falta_key_inicial):
+    etiqueta_elegida = st.radio(
+        "Selecciona el Entorno de Ejecución:",
+        options=etiquetas_proveedores,
+        index=indice_activo,
+    )
+    prov_key = claves_proveedores[etiquetas_proveedores.index(etiqueta_elegida)]
+    prov_config = proveedores[prov_key]
+
+    base_url = prov_config["base_url"]
+    modelos_texto_disponibles = prov_config.get("text_models") or prov_config.get("vision_models", [])
+    modelo_seleccionado = st.selectbox(
+        "Modelo de texto (informe clínico):",
+        modelos_texto_disponibles,
+        index=modelos_texto_disponibles.index(prov_config["model"])
+        if prov_config.get("model") in modelos_texto_disponibles
+        else 0,
+    )
+
+    api_key = None
+    if prov_config.get("needs_api_key", False):
+        api_key_env = prov_config.get("api_key_env")
+        api_key = os.getenv(api_key_env)
+        if not api_key:
+            st.warning(f"⚠️ Falta {api_key_env} para usar {prov_config.get('label', prov_key)}.")
             nueva_key = st.text_input(f"{api_key_env}", type="password", key=f"apikey_{prov_key}")
             if st.button("Guardar API key", key=f"guardar_apikey_{prov_key}") and nueva_key:
                 guardar_api_key(api_key_env, nueva_key)
-                st.sidebar.success("API key guardada en .env. Selecciona el proveedor de nuevo si no se aplica.")
+                st.success("API key guardada en .env.")
                 api_key = nueva_key
-else:
-    api_key = "local-key"
+    else:
+        api_key = "local-key"
 
-if st.sidebar.button("💾 Guardar como predeterminado"):
-    config_data["active_provider"] = prov_key
-    config_data["providers"][prov_key]["model"] = modelo_seleccionado
-    guardar_config_app(config_data)
-    st.sidebar.success("Preferencia guardada en config.yaml.")
+    if st.button("💾 Guardar como predeterminado"):
+        config_data["active_provider"] = prov_key
+        config_data["providers"][prov_key]["model"] = modelo_seleccionado
+        guardar_config_app(config_data)
+        st.success("Preferencia guardada en config.yaml.")
 
 try:
     client = OpenAI(base_url=base_url, api_key=api_key if api_key else "dummy-key", timeout=90.0)
     if api_key:
-        st.sidebar.success(f"Conectado a: **{prov_config.get('label', prov_key)}**")
+        st.sidebar.success(f"🟢 **IA Conectada y Lista**\n({prov_config.get('label', prov_key)})")
+    else:
+        st.sidebar.warning("🟡 **IA sin credencial:** Solo Informe por Plantilla activo.")
 except Exception as e:
     st.sidebar.error(f"Error al inicializar cliente: {e}")
     client = None
@@ -327,15 +339,47 @@ def _aplicar_sugerencia(key_prefix, sugerencia, valor_default_1=None, valor_defa
     st.session_state[f"{key_prefix}_ver"] = st.session_state.get(f"{key_prefix}_ver", 0) + 1
 
 
+def _asignar_valor_escala(key_prefix: str, sufijo_campo: str, nuevo_valor: float):
+    """Bloque B: Callback `on_click` para botones rápidos de 1 clic ('píldoras de escala')."""
+    st.session_state[f"{key_prefix}_{sufijo_campo}"] = float(nuevo_valor)
+
+
+def _intercambiar_valores_escala(key_prefix: str):
+    """Bloque B: Callback `on_click` para corregir en 1 clic cuando el usuario invirtió
+    los números de la Línea 1 Azul y la Línea 2 Roja."""
+    v1_prev = float(st.session_state.get(f"{key_prefix}_v1", 0.0))
+    v2_prev = float(st.session_state.get(f"{key_prefix}_v2", 0.0))
+    st.session_state[f"{key_prefix}_v1"] = v2_prev
+    st.session_state[f"{key_prefix}_v2"] = v1_prev
+
+
+def _activar_modo_demo():
+    """Bloque C: Activa un trazado sintético generado 100% en memoria para practicar."""
+    st.session_state["usando_demo"] = True
+    st.session_state["demo_bytes"] = ux_helpers.generar_imagen_ctg_demo()
+    st.session_state.pop("archivo_actual", None)
+
+
+def _desactivar_modo_demo():
+    """Bloque C: Cierra el modo práctica y limpia el estado de sesión."""
+    st.session_state.pop("usando_demo", None)
+    st.session_state.pop("demo_bytes", None)
+    st.session_state.pop("archivo_actual", None)
+    st.session_state.pop("prep", None)
+    st.session_state.pop("resultado_digitalizacion", None)
+    st.session_state.pop("informe_llm", None)
+
+
 def _widget_calibracion(prep, panel, nombre, valor_default_1, valor_default_2, key_prefix, x0, x1):
     """Muestra el panel recortado con 2 líneas horizontales interactivas (🔵 Línea 1 Azul
     y 🔴 Línea 2 Roja) que se arrastran directamente con el mouse hacia arriba o abajo
-    sin que la imagen desaparezca ni parpadee, y permite confirmar debajo el número
-    impreso en el papel para cada línea. Devuelve CalibracionEje o None."""
+    sin que la imagen desaparezca ni parpadee, ofrece píldoras de 1 clic para elegir
+    los números estándar del papel y valida la coherencia física de la escala (Bloque B).
+    Devuelve CalibracionEje o None."""
     st.markdown(
         f"**Panel {nombre}** — **1)** Arrastra con el mouse la **🔵 Línea 1 (Azul)** y la **🔴 Línea 2 (Roja)** "
         f"sobre la imagen hasta ubicarlas encima de dos líneas con número impreso en el papel. "
-        f"**2)** Abajo, **confirma el número** de cada línea."
+        f"**2)** Abajo, **confirma el número** con un clic en los botones rápidos o en la casilla."
     )
     clics_key = f"{key_prefix}_clics"
     ver_key = f"{key_prefix}_ver"
@@ -389,7 +433,6 @@ def _widget_calibracion(prep, panel, nombre, valor_default_1, valor_default_2, k
     )
 
     if isinstance(respuesta_drag, dict) and "y1_px" in respuesta_drag and "y2_px" in respuesta_drag:
-        # Solo aplicar si corresponde al sync_id vigente (no pisar un reset recién hecho)
         if respuesta_drag.get("sync_id", st.session_state[ver_key]) == st.session_state[ver_key]:
             y1_abs = float(respuesta_drag["y1_px"]) * escala + panel.y0
             y2_abs = float(respuesta_drag["y2_px"]) * escala + panel.y0
@@ -397,62 +440,170 @@ def _widget_calibracion(prep, panel, nombre, valor_default_1, valor_default_2, k
 
     clics = st.session_state[clics_key]
 
-    ejemplos = "ej. 210, 180, 150, 120, 90, 60, 30" if valor_default_1 > 120 else "ej. 100, 80, 60, 50, 40, 25, 20, 0"
-    col1, col2, col3 = st.columns([2, 2, 1.5])
-    valor1 = col1.number_input(
-        f"🔵 Confirmar número Línea 1 Azul ({nombre})",
-        step=10.0,
-        format="%.0f",
-        help=f"Escribe o ajusta el número impreso en el papel donde dejaste la Línea 1 Azul ({ejemplos}).",
-        key=f"{key_prefix}_v1",
-    )
-    valor2 = col2.number_input(
-        f"🔴 Confirmar número Línea 2 Roja ({nombre})",
-        step=10.0,
-        format="%.0f",
-        help=f"Escribe o ajusta el número impreso en el papel donde dejaste la Línea 2 Roja ({ejemplos}).",
-        key=f"{key_prefix}_v2",
-    )
-    if sugerencia is not None:
-        col3.write("")
-        col3.button(
-            "✨ Restaurar posición inicial",
-            key=f"{key_prefix}_auto",
-            on_click=_aplicar_sugerencia,
-            args=(key_prefix, sugerencia, valor_default_1, valor_default_2),
-            use_container_width=True,
-        )
-    st.caption(
-        f"💡 **Paso visual:** Arrastra con el mouse las líneas **🔵 Azul** y **🔴 Roja** sobre la imagen de arriba "
-        f"y confirma aquí abajo el número impreso en esa línea del papel ({ejemplos})."
-    )
+    es_fcf = valor_default_1 > 120
+    ejemplos = "ej. 210, 180, 150, 120, 90, 60, 30" if es_fcf else "ej. 100, 80, 60, 50, 40, 25, 20, 0"
+    presets_1 = ux_helpers.PRESETS_LINEA_1_FCF if es_fcf else ux_helpers.PRESETS_LINEA_1_UA
+    presets_2 = ux_helpers.PRESETS_LINEA_2_FCF if es_fcf else ux_helpers.PRESETS_LINEA_2_UA
 
-    if len(clics) == 2 and valor1 != valor2 and abs(clics[1] - clics[0]) >= 2.0:
+    col1, col2, col3 = st.columns([2, 2, 1.4])
+    with col1:
+        valor1 = st.number_input(
+            f"🔵 Confirmar número Línea 1 Azul ({nombre})",
+            step=10.0,
+            format="%.0f",
+            help=f"Escribe o elige con 1 clic el número impreso en el papel donde dejaste la Línea 1 Azul ({ejemplos}).",
+            key=f"{key_prefix}_v1",
+        )
+        pcols1 = st.columns(len(presets_1))
+        for pcol, pval in zip(pcols1, presets_1):
+            pcol.button(
+                f"{pval}",
+                key=f"{key_prefix}_p1_{pval}",
+                type="primary" if int(round(valor1)) == pval else "secondary",
+                on_click=_asignar_valor_escala,
+                args=(key_prefix, "v1", float(pval)),
+                use_container_width=True,
+            )
+    with col2:
+        valor2 = st.number_input(
+            f"🔴 Confirmar número Línea 2 Roja ({nombre})",
+            step=10.0,
+            format="%.0f",
+            help=f"Escribe o elige con 1 clic el número impreso en el papel donde dejaste la Línea 2 Roja ({ejemplos}).",
+            key=f"{key_prefix}_v2",
+        )
+        pcols2 = st.columns(len(presets_2))
+        for pcol, pval in zip(pcols2, presets_2):
+            pcol.button(
+                f"{pval}",
+                key=f"{key_prefix}_p2_{pval}",
+                type="primary" if int(round(valor2)) == pval else "secondary",
+                on_click=_asignar_valor_escala,
+                args=(key_prefix, "v2", float(pval)),
+                use_container_width=True,
+            )
+    with col3:
+        if sugerencia is not None:
+            st.write("")
+            st.button(
+                "✨ Restaurar posición inicial",
+                key=f"{key_prefix}_auto",
+                on_click=_aplicar_sugerencia,
+                args=(key_prefix, sugerencia, valor_default_1, valor_default_2),
+                use_container_width=True,
+            )
+
+    if len(clics) == 2:
+        validacion = ux_helpers.validar_estado_calibracion(clics[0], valor1, clics[1], valor2)
+        if not validacion["valido"]:
+            st.warning(f"⚠️ **Control de seguridad en {nombre}:** {validacion['mensaje']}")
+            if validacion["codigo"] == "escala_invertida":
+                st.button(
+                    "🔄 Intercambiar valores Azul ↔ Roja en 1 clic",
+                    key=f"{key_prefix}_swap",
+                    on_click=_intercambiar_valores_escala,
+                    args=(key_prefix,),
+                )
+            return None
         return calibrar_desde_dos_puntos(clics[0], valor1, clics[1], valor2, panel)
     return None
 
 
+def _render_barra_progreso_ux(tiene_archivo: bool, ya_digitalizado: bool):
+    """Bloque A (UX): Barra visual de progreso en 3 etapas para orientar a la
+    persona usuaria en todo momento sin necesidad de instrucciones largas."""
+    if not tiene_archivo:
+        etapa_actual = 1
+    elif not ya_digitalizado:
+        etapa_actual = 2
+    else:
+        etapa_actual = 3
+
+    etapas = [
+        (
+            1,
+            "1. Cargar monitoreo",
+            "Sube la imagen JPG/PNG o PDF del trazado CTG.",
+        ),
+        (
+            2,
+            "2. Validar líneas de escala",
+            "Arrastra las líneas 🔵 Azul y 🔴 Roja y confirma sus números.",
+        ),
+        (
+            3,
+            "3. Informes y PDF Consolidado",
+            "Revisa la curva, compara Plantilla vs. IA y descarga el PDF.",
+        ),
+    ]
+    cols = st.columns(3)
+    for col, (num, titulo, desc) in zip(cols, etapas):
+        with col.container(border=True):
+            if num < etapa_actual or (num == 3 and ya_digitalizado):
+                st.markdown(f"✅ **{titulo}** *(Completado)*")
+            elif num == etapa_actual:
+                st.markdown(f"🔵 **{titulo}** *(Paso actual)*")
+            else:
+                st.markdown(f"⚪ **{titulo}** *(Pendiente)*")
+            st.caption(desc)
+
+
 # --- GUÍA PASO A PASO Y CARGA DE ARCHIVO ---
-with st.expander("🧭 ¿Cómo funciona el sistema? — Guía rápida paso a paso", expanded=True):
+_tiene_archivo_previo = bool(st.session_state.get("archivo_actual"))
+with st.expander("🧭 ¿Cómo funciona el sistema? — Guía rápida paso a paso", expanded=not _tiene_archivo_previo):
     st.markdown(
         """
-1. **Paso 1 — Cargar el monitoreo (Imagen o PDF):** Sube la foto o escaneo del trazado. *¿Qué hace el sistema?* Endereza la hoja automáticamente, lee los datos de cabecera (ID, fecha, velocidad) y separa el gráfico superior (**FCF: Frecuencia Cardíaca Fetal**) del inferior (**UA: Actividad Uterina / Contracciones**).
+1. **Paso 1 — Cargar el monitoreo (Imagen o PDF):** Sube la foto o escaneo del trazado (o usa el botón **«🧪 Probar con un trazado de ejemplo»**). *¿Qué hace el sistema?* Endereza la hoja automáticamente, lee los datos de cabecera y separa el gráfico superior (**FCF**) del inferior (**UA**).
 2. **Paso 2 — Mover las líneas con el mouse y confirmar el número (Calibración):** Sobre cada gráfico verás una **🔵 Línea 1 (Azul)** y una **🔴 Línea 2 (Roja)**:
    - **Arrastra cada línea con el mouse** hacia arriba o hacia abajo hasta ubicarla sobre una línea del papel que tenga número impreso (por ejemplo, `210` y `60` o `30` en FCF; `100` y `0` en UA).
-   - **Abajo de la imagen**, confirma o escribe el número exacto de esa línea en las casillas **🔵 Confirmar número Línea 1 Azul** y **🔴 Confirmar número Línea 2 Roja**.
+   - **Abajo de la imagen**, haz clic en el botón rápido del número (o escríbelo en la casilla).
 3. **Paso 3 — Digitalizar y generar informes en un clic:** Pulsa **«🚀 Digitalizar trazado y generar informes»**. Verás la curva extraída dibujada en **celeste** sobre el papel para auditoría visual.
 4. **Paso 4 — Clasificación, Comparación lado a lado y PDF Consolidado:** El sistema entrega la **Categoría FIGO 2015 / Semáforo NICE**, compara fila por fila el **Informe por Plantilla** con el **Informe con IA (LLM)** y permite descargar el **Reporte Clínico Consolidado (.pdf)**.
         """
     )
 
-archivo_subido = st.file_uploader(
-    "Paso 1: Sube un CSV (columnas 'tiempo' y 'fcf') o una imagen/PDF del trazado CTG",
-    type=["csv", "jpg", "jpeg", "png", "pdf"],
-)
+up_col1, up_col2 = st.columns([3, 1.3])
+with up_col1:
+    archivo_subido = st.file_uploader(
+        "Paso 1: Sube un CSV (columnas 'tiempo' y 'fcf') o una imagen/PDF del trazado CTG",
+        type=["csv", "jpg", "jpeg", "png", "pdf"],
+    )
+with up_col2:
+    st.write("")
+    st.write("")
+    if not st.session_state.get("usando_demo"):
+        st.button(
+            "🧪 Probar con un trazado de ejemplo",
+            on_click=_activar_modo_demo,
+            use_container_width=True,
+            help="Carga un trazado CTG sintético generado en memoria (sin datos de pacientes reales) para practicar los 3 pasos.",
+        )
+    else:
+        st.button(
+            "❌ Salir del modo ejemplo",
+            on_click=_desactivar_modo_demo,
+            use_container_width=True,
+        )
 
-if archivo_subido is not None:
+if archivo_subido is not None and st.session_state.get("usando_demo"):
+    # Si el usuario sube un archivo real, priorizar el archivo subido
+    st.session_state.pop("usando_demo", None)
+    st.session_state.pop("demo_bytes", None)
+
+usando_demo_activo = bool(st.session_state.get("usando_demo") and archivo_subido is None)
+if usando_demo_activo:
+    st.info(
+        "🧪 **Modo Práctica Activo:** Estás utilizando un trazado CTG sintético de demostración "
+        "(100% generado en memoria y libre de datos de pacientes reales)."
+    )
+
+if archivo_subido is None and not usando_demo_activo:
+    _render_barra_progreso_ux(tiene_archivo=False, ya_digitalizado=False)
+
+if archivo_subido is not None or usando_demo_activo:
     os.makedirs("data", exist_ok=True)
-    extension = os.path.splitext(archivo_subido.name)[1].lower()
+    nombre_origen = "demo_sintetico.png" if usando_demo_activo else archivo_subido.name
+    extension = ".png" if usando_demo_activo else os.path.splitext(archivo_subido.name)[1].lower()
 
     if extension == ".csv":
         try:
@@ -470,11 +621,7 @@ if archivo_subido is not None:
             st.error(f"Error al procesar el archivo: {e}")
 
     else:
-        # Solo re-preparar (orientar + detectar paneles) si es un archivo nuevo — evita
-        # recalcular en cada rerun que dispara un clic de calibración. "archivo_actual"
-        # solo se marca DESPUÉS de que preparar_imagen() tuvo éxito, para que si falla
-        # se pueda reintentar (y se vea el error real) en vez de quedar en un estado roto.
-        if st.session_state.get("archivo_actual") != archivo_subido.name:
+        if st.session_state.get("archivo_actual") != nombre_origen:
             st.session_state.pop("prep", None)
             for _p in ("fcf", "ua"):
                 st.session_state[f"{_p}_clics"] = []
@@ -490,11 +637,15 @@ if archivo_subido is not None:
             st.session_state.pop("modelo_usado_llm", None)
             try:
                 with st.spinner("Orientando imagen y detectando paneles FCF/UA..."):
-                    imagen_bytes, dpi_usado = _imagen_bytes_desde_archivo(archivo_subido, extension)
+                    if usando_demo_activo:
+                        imagen_bytes = st.session_state["demo_bytes"]
+                        dpi_usado = DPI_RENDER_PDF
+                    else:
+                        imagen_bytes, dpi_usado = _imagen_bytes_desde_archivo(archivo_subido, extension)
                     st.session_state.prep = preparar_imagen(imagen_bytes, dpi_render=dpi_usado)
                     st.session_state.metadatos_cabecera = extraer_metadatos_cabecera(imagen_bytes)
                     st.session_state.anotaciones_clinicas = detectar_anotaciones_clinicas(st.session_state.prep)
-                st.session_state.archivo_actual = archivo_subido.name
+                st.session_state.archivo_actual = nombre_origen
             except Exception as e:
                 st.error(f"Error al preparar la imagen: {e}")
                 st.exception(e)
@@ -503,6 +654,9 @@ if archivo_subido is not None:
             st.stop()
 
         prep = st.session_state.prep
+        ya_digitalizado = "resultado_digitalizacion" in st.session_state
+        _render_barra_progreso_ux(tiene_archivo=True, ya_digitalizado=ya_digitalizado)
+
         for adv in prep.advertencias:
             st.warning(adv)
 
@@ -510,7 +664,7 @@ if archivo_subido is not None:
             st.info(adv)
 
         meta = st.session_state.get("metadatos_cabecera") or {}
-        with st.expander("📋 Metadatos del registro y contexto obstétrico (opcional — enriquece los informes y el PDF)", expanded=True):
+        with st.expander("📋 Metadatos del registro y contexto obstétrico (opcional — enriquece los informes y el PDF)", expanded=not ya_digitalizado):
             st.caption(
                 "Los datos de cabecera se leen localmente por OCR de mejor esfuerzo. "
                 "Puedes corregirlos o agregar el contexto obstétrico para que ambos informes y el PDF consolidado lo integren."
@@ -546,63 +700,112 @@ if archivo_subido is not None:
                 index=2,
                 key="ctx_oxitocina",
             )
+            c4, c5, c6 = st.columns(3)
+            c4.selectbox(
+                "Líquido amniótico / Meconio (Protocolo V2)",
+                options=[
+                    "No especificado",
+                    "No (líquido claro / membranas íntegras)",
+                    "Sí (meconio presente)",
+                ],
+                index=0,
+                key="ctx_meconio",
+            )
+            c5.text_input(
+                "Patología antenatal (opcional, ej. RCIU, PE, DG)",
+                value="",
+                key="ctx_patologia_antenatal",
+            )
+            c6.text_input(
+                "Comparación con MEFI previos (Protocolo V2)",
+                value="",
+                placeholder="Ej. Sin cambios vs. MEFI previo / descenso basal...",
+                key="ctx_comparacion_mefi_previos",
+            )
+            st.caption(
+                "💡 **Recordatorio Protocolo V2:** siempre compare el trazado actual con los registros MEFI previos "
+                "de la misma paciente para evaluar la evolución temporal de la línea base y la variabilidad."
+            )
 
-        st.subheader("1. Calibración y validación de coordenadas del trazado")
-        st.info(
-            "**¿Qué debes hacer en este paso?**\n"
-            "1. **Arrastra con el mouse** la **🔵 Línea 1 (Azul)** y la **🔴 Línea 2 (Roja)** hacia arriba o hacia abajo directamente sobre cada imagen hasta ubicarlas sobre dos líneas del papel que tengan número impreso.\n"
-            "2. **Abajo de cada imagen, confirma el número** impreso en el papel para la línea azul y la línea roja (por ejemplo: `210` y `60` o `30` en FCF; `100` y `0` en UA).\n"
-            "3. Pulsa **«🚀 Digitalizar trazado y generar informes»** para obtener la curva auditada, el Informe por Plantilla, el Informe IA y el PDF Consolidado en un solo paso."
+        titulo_paso1 = (
+            "✅ Paso 1 completado: Escala calibrada (FCF y UA) — Haz clic aquí si deseas reajustar las líneas"
+            if ya_digitalizado
+            else "🔵 1. Calibración y validación de coordenadas del trazado (Paso actual)"
         )
-        x0_zoom, x1_zoom = _selector_zoom(prep)
-        cal_fcf = _widget_calibracion(prep, prep.panel_fcf, "FCF (lpm)", 210, 30, "fcf", x0_zoom, x1_zoom)
-        st.divider()
-        cal_ua = _widget_calibracion(prep, prep.panel_ua, "UA", 100, 0, "ua", x0_zoom, x1_zoom)
+        with st.expander(titulo_paso1, expanded=not ya_digitalizado):
+            st.info(
+                "**¿Qué debes hacer en este paso?**\n"
+                "1. **Arrastra con el mouse** la **🔵 Línea 1 (Azul)** y la **🔴 Línea 2 (Roja)** hacia arriba o hacia abajo directamente sobre cada imagen hasta ubicarlas sobre dos líneas del papel que tengan número impreso.\n"
+                "2. **Abajo de cada imagen, confirma el número** impreso en el papel para la línea azul y la línea roja (por ejemplo: `210` y `60` o `30` en FCF; `100` y `0` en UA).\n"
+                "3. Pulsa **«🚀 Digitalizar trazado y generar informes»** para obtener la curva auditada, el Informe por Plantilla, el Informe IA y el PDF Consolidado en un solo paso."
+            )
+            x0_zoom, x1_zoom = _selector_zoom(prep)
+            cal_fcf = _widget_calibracion(prep, prep.panel_fcf, "FCF (lpm)", 210, 30, "fcf", x0_zoom, x1_zoom)
+            st.divider()
+            cal_ua = _widget_calibracion(prep, prep.panel_ua, "UA", 100, 0, "ua", x0_zoom, x1_zoom)
 
-        if cal_fcf is not None and cal_ua is not None:
-            st.success(
-                "✅ Coordenadas de ambos paneles listas. "
-                "Una vez ubicadas las líneas con el mouse y confirmados sus números, presiona el botón para procesar todo:"
-            )
-            if st.button("🚀 Digitalizar trazado y generar informes (Plantilla + IA)", type="primary", use_container_width=True):
-                with st.spinner("Extrayendo curvas FCF/UA..."):
-                    st.session_state.resultado_digitalizacion = digitalizar_con_calibracion(
-                        prep, cal_fcf, cal_ua
-                    )
-                    st.session_state.pop("informe_llm", None)
-                    st.session_state.pop("modelo_usado_llm", None)
-                # Ejecución automática del informe LLM en el mismo paso si hay conexión
-                try:
-                    features_auto = clinical.extraer_features(st.session_state.resultado_digitalizacion.df)
-                    meta_auto = {
-                        "id": st.session_state.get("meta_id") or meta.get("id"),
-                        "fecha_hora": st.session_state.get("meta_fecha") or meta.get("fecha_hora"),
-                        "velocidad_papel_cm_min": st.session_state.get("meta_velocidad") or 1.0,
-                        "edad_gestacional": st.session_state.get("ctx_eg") or "",
-                        "contexto_clinico": st.session_state.get("ctx_etapa") or "No especificado",
-                        "uso_oxitocina": st.session_state.get("ctx_oxitocina") or "No especificado",
-                    }
-                    _ejecutar_llm_con_fallback(features_auto, metadatos=meta_auto)
-                except Exception:
-                    pass
-        else:
-            faltan = []
-            if cal_fcf is None:
-                faltan.append("panel FCF")
-            if cal_ua is None:
-                faltan.append("panel UA")
-            st.warning(
-                f"⏳ Falta completar los 2 puntos de referencia en: **{', '.join(faltan)}**. "
-                "Usa el botón «✨ Detección automática» o haz 2 clics sobre las líneas del gráfico correspondiente."
-            )
+            if cal_fcf is not None and cal_ua is not None:
+                st.success(
+                    "✅ Coordenadas de ambos paneles listas. "
+                    "Una vez ubicadas las líneas con el mouse y confirmados sus números, presiona el botón para procesar todo:"
+                )
+                if st.button("🚀 Digitalizar trazado y generar informes (Plantilla + IA)", type="primary", use_container_width=True):
+                    with st.spinner("Extrayendo curvas FCF/UA..."):
+                        st.session_state.resultado_digitalizacion = digitalizar_con_calibracion(
+                            prep, cal_fcf, cal_ua
+                        )
+                        st.session_state.pop("informe_llm", None)
+                        st.session_state.pop("modelo_usado_llm", None)
+                    # Ejecución automática del informe LLM en el mismo paso si hay conexión
+                    try:
+                        eg_auto = st.session_state.get("ctx_eg") or ""
+                        features_auto = clinical.extraer_features(
+                            st.session_state.resultado_digitalizacion.df,
+                            edad_gestacional_sem=eg_auto,
+                        )
+                        meta_auto = {
+                            "id": st.session_state.get("meta_id") or meta.get("id"),
+                            "fecha_hora": st.session_state.get("meta_fecha") or meta.get("fecha_hora"),
+                            "velocidad_papel_cm_min": st.session_state.get("meta_velocidad") or 1.0,
+                            "edad_gestacional": eg_auto,
+                            "contexto_clinico": st.session_state.get("ctx_etapa") or "No especificado",
+                            "uso_oxitocina": st.session_state.get("ctx_oxitocina") or "No especificado",
+                            "meconio": st.session_state.get("ctx_meconio") or "No especificado",
+                            "patologia_antenatal": st.session_state.get("ctx_patologia_antenatal") or "",
+                            "comparacion_mefi_previos": st.session_state.get("ctx_comparacion_mefi_previos") or "",
+                        }
+                        _ejecutar_llm_con_fallback(features_auto, metadatos=meta_auto)
+                    except Exception:
+                        pass
+                    st.rerun()
+            else:
+                faltan = []
+                if cal_fcf is None:
+                    faltan.append("panel FCF")
+                if cal_ua is None:
+                    faltan.append("panel UA")
+                st.warning(
+                    f"⏳ Falta completar los 2 puntos de referencia en: **{', '.join(faltan)}**. "
+                    "Asegúrate de que ambas líneas tengan valores distintos y estén separadas sobre el papel."
+                )
 
         if "resultado_digitalizacion" in st.session_state:
             resultado = st.session_state.resultado_digitalizacion
             st.subheader("2. Curva digitalizada (auditoría)")
-            st.caption(
-                "Verifica que la línea celeste siga el trazo impreso en el papel. Si la curva está "
-                "desplazada verticalmente, ajusta los puntos de calibración en el Paso 1 y vuelve a digitalizar."
-            )
+            calidad_trazo = ux_helpers.calcular_calidad_lectura(resultado.df)
+            aud_col1, aud_col2 = st.columns([3.5, 1.3])
+            with aud_col1:
+                if calidad_trazo["nivel"] == "alta":
+                    st.success(calidad_trazo["resumen"])
+                elif calidad_trazo["nivel"] == "media":
+                    st.info(calidad_trazo["resumen"])
+                else:
+                    st.warning(calidad_trazo["resumen"])
+            with aud_col2:
+                if st.button("🔧 Reajustar líneas de escala (Paso 1)", use_container_width=True):
+                    st.session_state.pop("resultado_digitalizacion", None)
+                    st.rerun()
+
             st.image(
                 resultado.overlay,
                 caption="Celeste = lectura directa · Naranja = tramo reconstruido por interpolación",
@@ -623,15 +826,24 @@ if archivo_subido is not None:
             with st.expander("Ver CSV digitalizado"):
                 st.dataframe(resultado.df)
 
-            st.subheader("3. Panel de Parámetros y Clasificación (FIGO 2015 / NICE NG229)")
+            st.subheader("3. Panel de Parámetros y Clasificación (FIGO 2015 / NICE NG229 / ACOG CPG No. 10 / Protocolo V2)")
             try:
-                features = clinical.extraer_features(resultado.df)
+                features = clinical.extraer_features(
+                    resultado.df,
+                    edad_gestacional_sem=st.session_state.get("ctx_eg") or None,
+                )
             except ValueError as e:
                 features = None
                 st.error(f"No se pudo calcular la clasificación clínica: {e}")
 
             if features is not None:
                 figo = features["figo"]
+                riesgo_cat2 = features.get("riesgo_categoria_ii") or clinical.evaluar_riesgo_categoria_ii(features)
+                sospecha_mat = features.get("sospecha_fcf_materna") or clinical.detectar_sospecha_fcf_materna(features)
+                acog_estricta = features.get("acog_estricta") or clinical.clasificar_acog_estricta(features)
+                criterios_60 = features.get("criterios_60") or clinical.evaluar_criterios_60(features["desaceleraciones"])
+                hipoxia_tip = features.get("hipoxia_tipificada") or clinical.tipificar_hipoxia(features, df=resultado.df)
+
                 color_semaforo = {"verde": "🟢", "amarillo": "🟡", "rojo": "🔴"}
                 banner_fn = {
                     "I": st.success,
@@ -642,6 +854,53 @@ if archivo_subido is not None:
                     f"### Categoría FIGO {figo['categoria']} — {figo['descripcion']}\n"
                     f"**Criterios determinantes:** {' · '.join(figo['razones'])}"
                 )
+
+                # A3: Alerta informativa de sospecha de FCF materna (ACOG CPG No. 10 / Protocolo V2)
+                if sospecha_mat.get("sospecha"):
+                    st.warning(sospecha_mat["mensaje"])
+
+                # C1: Alerta informativa de Criterios «60» cuando supera 30 min
+                if criterios_60.get("alerta_activa"):
+                    st.error(criterios_60["resumen"])
+
+                # A2, A5, C1 & C2: Tarjetas normativas de subclasificación y fisiopatología
+                norm_col1, norm_col2 = st.columns(2)
+                with norm_col1.container(border=True):
+                    icono_riesgo = {
+                        "alto": "🔴",
+                        "intermedio": "🟡",
+                        "con rasgos protectores": "🟢",
+                    }.get(riesgo_cat2["nivel"], "🟡")
+                    st.caption("📋 Estratificación de Riesgo en Categoría II (Box 3 ACOG CPG No. 10)")
+                    st.markdown(f"**{icono_riesgo} Nivel: {riesgo_cat2['nivel'].upper()}**")
+                    st.caption(" · ".join(riesgo_cat2["razones"]))
+                with norm_col2.container(border=True):
+                    st.caption("⚖️ Lectura Comparativa: ACOG CPG No. 10 Estricta vs. MEFI (Alta Sensibilidad)")
+                    st.markdown(
+                        f"**ACOG estricta: Categoría {acog_estricta['categoria']}** "
+                        + ("*(difiere de MEFI)*" if acog_estricta["difiere_de_mefi"] else "*(concordante con MEFI)*")
+                    )
+                    st.caption(acog_estricta["nota_comparativa"])
+
+                fisio_col1, fisio_col2 = st.columns(2)
+                with fisio_col1.container(border=True):
+                    st.caption("🧬 Tipificación Determinística de Hipoxia (Protocolo V2)")
+                    icono_hip = "🔴" if hipoxia_tip.get("activa") else "🟢"
+                    st.markdown(f"**{icono_hip} {hipoxia_tip['tipo']}**")
+                    st.caption(hipoxia_tip["resumen"])
+                with fisio_col2.container(border=True):
+                    st.caption("⏱️ Marcador Independiente Criterios «60» en Variables (Protocolo V2)")
+                    icono_c60 = (
+                        "🔴 Activo (>30 min)"
+                        if criterios_60.get("alerta_activa")
+                        else (
+                            f"🟡 {criterios_60.get('num_eventos_dos_o_mas_criterios', 0)} evento(s) (<30 min)"
+                            if criterios_60.get("num_eventos_dos_o_mas_criterios", 0) > 0
+                            else "🟢 Inactivo"
+                        )
+                    )
+                    st.markdown(f"**{icono_c60}**")
+                    st.caption(criterios_60["resumen"])
 
                 contr = features.get("contracciones") or {}
                 valor_contracciones = (
@@ -661,7 +920,9 @@ if archivo_subido is not None:
                 with k2.container(border=True):
                     st.caption(f"{color_semaforo[figo['semaforo_nice']['variabilidad']]} Variabilidad")
                     st.markdown(f"**{features['variabilidad']['amplitud_media_lpm']} lpm**")
-                    st.caption(f"Cat: {features['variabilidad']['categoria']}")
+                    st.caption(
+                        f"{features['variabilidad']['categoria']} / NICHD: {features['variabilidad'].get('categoria_nichd', features['variabilidad']['categoria'])}"
+                    )
                 with k3.container(border=True):
                     st.caption("🟢 Aceleraciones")
                     st.markdown(f"**{len(features['aceleraciones'])} eventos**")
@@ -684,8 +945,17 @@ if archivo_subido is not None:
                     st.markdown("**Presente**" if es_sin else "**Ausente**")
                     st.caption("Banda 3–5 cpm")
 
-                with st.expander("🔍 Ver desglose detallado de desaceleraciones y tabla técnica"):
-                    st.json(features["desaceleraciones"])
+                filas_decel = ux_helpers.formatear_tabla_desaceleraciones(features["desaceleraciones"])
+                with st.expander(
+                    f"🔍 Ver tabla clínica de desaceleraciones detectadas ({len(filas_decel)} eventos)",
+                    expanded=bool(filas_decel),
+                ):
+                    if filas_decel:
+                        st.table(filas_decel)
+                    else:
+                        st.caption(
+                            "✅ No se detectaron desaceleraciones (caídas ≥15 lpm durante ≥15 s) en el registro analizado."
+                        )
 
                 # --- PASO 4: COMPARACIÓN ORDENADA (PLANTILLA vs LLM) + REPORTE PDF CONSOLIDADO ---
                 st.subheader("4. Comparación de Informes (Plantilla vs. IA) y Reporte Final en PDF")
@@ -721,6 +991,9 @@ if archivo_subido is not None:
                     "edad_gestacional": st.session_state.get("ctx_eg") or "",
                     "contexto_clinico": st.session_state.get("ctx_etapa") or "No especificado",
                     "uso_oxitocina": st.session_state.get("ctx_oxitocina") or "No especificado",
+                    "meconio": st.session_state.get("ctx_meconio") or "No especificado",
+                    "patologia_antenatal": st.session_state.get("ctx_patologia_antenatal") or "",
+                    "comparacion_mefi_previos": st.session_state.get("ctx_comparacion_mefi_previos") or "",
                     "profesional": prof_nombre,
                     "observaciones_clinicas": prof_obs,
                 }

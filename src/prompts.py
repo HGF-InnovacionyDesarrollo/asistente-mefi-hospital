@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import clinical
 
-VERSION_PROMPT = "v1-fase3-2026-08-13"
+VERSION_PROMPT = "v2.0-final-2026-11-09"
 
 SYSTEM_INSTRUCTIONS = f"""# SYSTEM INSTRUCTIONS: Asesor Clínico MEFI - Hospital Dr. Gustavo Fricke ({VERSION_PROMPT})
 
@@ -19,7 +19,9 @@ SYSTEM_INSTRUCTIONS = f"""# SYSTEM INSTRUCTIONS: Asesor Clínico MEFI - Hospital
 **Rol:** Eres un Asistente Clínico Experto en Medicina Materno-Fetal.
 **Misión:** Interpretar variables cardiotocográficas (MEFI) ya digitalizadas y
 clasificadas de forma determinística, y proponer razonamiento clínico y conducta
-sugerida basada en el Protocolo Institucional.
+sugerida basada en el Protocolo de Vigilancia del Bienestar Fetal Intraparto V2
+(Hospital Dr. Gustavo Fricke, sept. 2025), ACOG Clinical Practice Guideline No. 10
+(Obstet Gynecol 2025;146:583–599), FIGO 2015 y NICE NG229.
 
 ## 2. QUÉ RECIBES Y QUÉ NO
 No ves la imagen del trazado. Recibes las variables FCF/UA ya extraídas por
@@ -27,33 +29,40 @@ visión clásica (no un LLM) y ya clasificadas según los umbrales FIGO 2015 /
 NICE NG229 listados abajo — NO inventes ni corrijas esas cifras, tu trabajo es
 interpretarlas clínicamente, no releerlas.
 
-## 3. UMBRALES DE REFERENCIA (FIGO 2015 / NICE NG229) — usados para la clasificación que recibís
+## 3. UMBRALES DE REFERENCIA (FIGO 2015 / NICE NG229 / ACOG CPG No. 10 / Protocolo V2)
 - Línea base normal: {clinical.BASAL_MIN_NORMAL}-{clinical.BASAL_MAX_NORMAL} lpm.
-- Variabilidad (banda de amplitud pico-a-pico por minuto): reducida <{clinical.VARIABILIDAD_REDUCIDA_MAX} lpm,
-  normal {clinical.VARIABILIDAD_REDUCIDA_MAX}-{clinical.VARIABILIDAD_NORMAL_MAX} lpm, aumentada >{clinical.VARIABILIDAD_NORMAL_MAX} lpm.
+- Variabilidad (banda de amplitud pico-a-pico por minuto): reducida <{clinical.VARIABILIDAD_REDUCIDA_MAX} lpm
+  (ACOG distingue ausente <{clinical.VARIABILIDAD_AUSENTE_MAX_LPM} lpm vs mínima ≤{clinical.VARIABILIDAD_REDUCIDA_MAX} lpm),
+  normal/moderada {clinical.VARIABILIDAD_REDUCIDA_MAX}-{clinical.VARIABILIDAD_NORMAL_MAX} lpm, aumentada/marcada >{clinical.VARIABILIDAD_NORMAL_MAX} lpm.
 - Aceleración/desaceleración: >={clinical.UMBRAL_ACEL_DECEL} lpm respecto de la línea base,
-  sostenido >={clinical.DURACION_MIN_EVENTO_S}s.
-- Desaceleración "muy prolongada" (criterio patológico directo): >={clinical.DESACEL_MUY_PROLONGADA_S // 60} min.
+  sostenido >={clinical.DURACION_MIN_EVENTO_S}s (en <32 semanas de EG: >=10 lpm por >=10s).
+- Desaceleración "prolongada" (ACOG Tabla 1 / Protocolo V2): >={clinical.DESACEL_PROLONGADA_MIN_S // 60} min ({clinical.DESACEL_PROLONGADA_MIN_S}s).
+- Desaceleración "muy prolongada" (criterio patológico directo FIGO 2015): >={clinical.DESACEL_MUY_PROLONGADA_S // 60} min ({clinical.DESACEL_MUY_PROLONGADA_S}s).
 - Patrón sinusoidal: oscilación regular {clinical.SINUSOIDAL_FRECUENCIA_MIN_CPM}-{clinical.SINUSOIDAL_FRECUENCIA_MAX_CPM}
-  ciclos/min, amplitud {clinical.SINUSOIDAL_AMPLITUD_MIN}-{clinical.SINUSOIDAL_AMPLITUD_MAX} lpm.
-- Contracciones (NICE NG229): <5 en 10 min es blanco; 5 o más en 10 minutos (con menor
-  tiempo de reposo) es ámbar y por sí solo descalifica de Categoría I.
+  ciclos/min, amplitud {clinical.SINUSOIDAL_AMPLITUD_MIN}-{clinical.SINUSOIDAL_AMPLITUD_MAX} lpm, sostenida
+  >={clinical.SINUSOIDAL_DURACION_MIN_S // 60} min (ACOG Tabla 1; Protocolo V2 exige >30 min sin aceleraciones).
+- Contracciones (NICE NG229 / ACOG CPG No. 10 / Protocolo V2): NICE NG229 define ámbar con >=5 en 10 min
+  (respaldo en registros <30 min); ACOG CPG No. 10 y Protocolo V2 definen taquisistolía como >5 contracciones
+  en 10 minutos promediadas en una ventana de 30 minutos. Ambos criterios se reportan explícitamente.
 - Categorías FIGO 2015: I (Normal) / II (Sospechoso) / III (Patológico).
 
 ## 4. ESTRUCTURA Y RAZONAMIENTO ESPERADO (OBLIGATORIO PARA COMPARACIÓN)
 Debes organizar tu respuesta en **exactamente estas 4 secciones numeradas** con encabezados `####`, para que el clínico pueda compararlas fila por fila contra el informe determinístico por plantilla:
 
 #### 1. Parámetros Cardiotocográficos Extraídos
-Sintetiza el hallazgo principal en 1-2 frases concisas integrando línea base, variabilidad, aceleraciones, desaceleraciones (y su área acumulada) y actividad uterina.
+Sintetiza el hallazgo principal en 1-2 frases concisas integrando línea base, variabilidad, aceleraciones, desaceleraciones (y su área acumulada), actividad uterina y, si aplica, la alerta de verificación de pulso materno (ACOG CPG No. 10).
 
-#### 2. Clasificación Normativa (FIGO 2015 / NICE NG229)
-Indica la Categoría FIGO (I, II o III) y el semáforo NICE recibidos, contrastando si el conjunto de variables amerita especial vigilancia.
+#### 2. Clasificación Normativa (FIGO 2015 / NICE NG229 / ACOG CPG No. 10)
+Indica la Categoría FIGO (I, II o III), el semáforo NICE, la estratificación de riesgo Box 3 ACOG para Categoría II (alto / intermedio / con rasgos protectores) y la lectura comparativa ACOG estricta vs. MEFI cuando difieran.
 
 #### 3. Correlación Fisiopatológica (Según Patrón Observado)
 Razona sobre la reserva autonómica y el **mecanismo fisiopatológico / tipo de hipoxia** más consistente con el patrón observado (precoz → compresión cefálica vagal; variable → compresión funicular; tardía repetitiva → insuficiencia uteroplacentaria) según el consenso fisiológico 2018/revisión 2024 — sin afirmar un diagnóstico definitivo.
 
 #### 4. Conducta Sugerida según Protocolo
-Propone medidas clínicas concretas y escalonadas acordes a la categoría FIGO y al semáforo NICE, cerrando con el disclaimer de que es una herramienta de apoyo que requiere validación humana.
+Propone medidas clínicas concretas con lenguaje de «conducta sugerida» alineadas con Protocolo V2 (sept. 2025) y ACOG CPG No. 10 (2025):
+- En **Categoría II**: aviso inmediato al médico/a ginecobstetra residente de turno (responsabilidad de la matrón/a según Protocolo V2); reanimación intrauterina (lateralización materna, hidratación EV/corrección de hipotensión, reducir o suspender oxitocina, amnioinfusión si hay desaceleraciones variables recurrentes, corrección de fisiopatología materna si hay taquicardia, oxígeno suplementario SOLO si hipoxia materna SatO2 < 94 % citando recomendación ACOG contra uso rutinario, y tocolisis de acción rápida —nitroglicerina/fenoterol institucional; ACOG cita terbutalina— si persiste taquisistolía con rasgos de alto riesgo); observación de ½ a 1 hora según Protocolo V2 matizada por Box 3 ACOG (explicitando que ACOG individualiza los tiempos).
+- En **Categoría III**: aviso inmediato y reanimación urgente; matices ACOG por subtipo (bradicardia con sospecha de rotura uterina → parto lo antes posible; contracción tetánica/taquisistolía → suspender uterotónicos y considerar tocolisis de acción rápida antes del parto; sinusoidal > 30 min → parto expedito); conservar máximo de 10 minutos de observación del Protocolo V2 si no revierte antes de interrupción expedita.
+- Cerrar siempre con el disclaimer regulador: ACOG CPG No. 10 recomienda contra depender primariamente de sistemas computarizados (fuerte, evidencia moderada) y referenciar el ensayo INFANT (Lancet 2017); requiere validación humana obligatoria.
 
 Responde en Markdown, en español, de forma directa y concisa (con viñetas breves).
 No inventes valores numéricos que no estén en los datos recibidos.
@@ -69,6 +78,11 @@ def construir_prompt_usuario(features: dict, metadatos: dict | None = None) -> s
     desaceleraciones = features["desaceleraciones"]
     sinusoidal = features["patron_sinusoidal"]
     figo = features["figo"]
+    riesgo_cat2 = features.get("riesgo_categoria_ii") or clinical.evaluar_riesgo_categoria_ii(features)
+    sospecha_mat = features.get("sospecha_fcf_materna") or clinical.detectar_sospecha_fcf_materna(features)
+    acog_estricta = features.get("acog_estricta") or clinical.clasificar_acog_estricta(features)
+    criterios_60 = features.get("criterios_60") or clinical.evaluar_criterios_60(desaceleraciones)
+    hipoxia_tip = features.get("hipoxia_tipificada") or clinical.tipificar_hipoxia(features)
 
     lineas = [
         "Interpreta el siguiente registro CTG ya digitalizado y clasificado. "
@@ -82,6 +96,12 @@ def construir_prompt_usuario(features: dict, metadatos: dict | None = None) -> s
             ctx_partes.append(f"Etapa/contexto: {metadatos['contexto_clinico']}")
         if metadatos.get("uso_oxitocina") and metadatos["uso_oxitocina"] != "No especificado":
             ctx_partes.append(f"Dinámica farmacológica: {metadatos['uso_oxitocina']}")
+        if metadatos.get("meconio") and metadatos["meconio"] != "No especificado":
+            ctx_partes.append(f"Meconio en líquido amniótico: {metadatos['meconio']}")
+        if metadatos.get("patologia_antenatal"):
+            ctx_partes.append(f"Patología antenatal: {metadatos['patologia_antenatal']}")
+        if metadatos.get("comparacion_mefi_previos"):
+            ctx_partes.append(f"Comparación con MEFI previos: {metadatos['comparacion_mefi_previos']}")
         if ctx_partes:
             lineas.extend(["", "## Contexto obstétrico aportado", " · ".join(ctx_partes)])
 
@@ -90,12 +110,17 @@ def construir_prompt_usuario(features: dict, metadatos: dict | None = None) -> s
         f"## Línea base\n{basal:.0f} lpm.",
         "",
         f"## Variabilidad\n{variabilidad['amplitud_media_lpm']} lpm de amplitud media "
-        f"({variabilidad['ventanas_evaluadas']} ventanas de 1 min evaluadas) — categoría: **{variabilidad['categoria']}**.",
+        f"({variabilidad['ventanas_evaluadas']} ventanas de 1 min evaluadas) — "
+        f"categoría FIGO/NICE: **{variabilidad['categoria']}** "
+        f"(NICHD/ACOG: **{variabilidad.get('categoria_nichd', variabilidad['categoria'])}**).",
         "",
         f"## Aceleraciones\n{len(aceleraciones)} detectada(s).",
     ])
     for a in aceleraciones[:10]:
-        lineas.append(f"- {a['inicio_s']:.0f}s-{a['fin_s']:.0f}s, +{a['amplitud_max_lpm']:.0f} lpm.")
+        etiq_ac = " [aceleración prolongada]" if a.get("prolongada") else ""
+        lineas.append(f"- {a['inicio_s']:.0f}s-{a['fin_s']:.0f}s ({a['duracion_s']:.0f}s), +{a['amplitud_max_lpm']:.0f} lpm{etiq_ac}.")
+    if sospecha_mat.get("sospecha"):
+        lineas.append(f"- {sospecha_mat['mensaje']}")
 
     lineas.append("")
     area_total = features.get("area_desaceleraciones_lpm_s")
@@ -111,11 +136,18 @@ def construir_prompt_usuario(features: dict, metadatos: dict | None = None) -> s
             marcas.append("prolongada")
         if d.get("muy_prolongada"):
             marcas.append("muy prolongada")
+        if d.get("variabilidad_reducida_intra_evento"):
+            marcas.append(f"variabilidad intra-evento reducida ({d.get('variabilidad_intra_lpm')} lpm <5 lpm)")
+        if d.get("criterios_60_cumplidos"):
+            marcas.append(f"criterios «60»: {', '.join(d['criterios_60_cumplidos'])}")
         sufijo = f" [{', '.join(marcas)}]" if marcas else ""
         lineas.append(
             f"- tipo **{d.get('tipo', 'sin clasificar')}**, {d['inicio_s']:.0f}s-{d['fin_s']:.0f}s "
-            f"({d['duracion_s']:.0f}s), -{d['amplitud_max_lpm']:.0f} lpm{sufijo}."
+            f"({d['duracion_s']:.0f}s), nadir {d.get('nadir_lpm', basal - d['amplitud_max_lpm']):.0f} lpm "
+            f"(-{d['amplitud_max_lpm']:.0f} lpm){sufijo}."
         )
+    if criterios_60.get("num_eventos_dos_o_mas_criterios", 0) > 0:
+        lineas.append(f"- {criterios_60['resumen']}")
 
     lineas.append("")
     if sinusoidal.get("presente"):
@@ -129,22 +161,33 @@ def construir_prompt_usuario(features: dict, metadatos: dict | None = None) -> s
     lineas.append("")
     contr = features.get("contracciones") or {}
     if contr.get("num") is not None:
+        tasa_30m = contr.get("por_10min_ventana_30m")
+        acog_30m = contr.get("tachisistolia_acog_30m", False)
+        txt_30m = (
+            f"; promedio móvil máx. en ventana de 30 min: {tasa_30m}/10 min "
+            f"({'taquisistolía ACOG >5/10 min' if acog_30m else 'sin taquisistolía ACOG 30 min'})"
+            if tasa_30m is not None
+            else "; registro <30 min (se usa tasa global como respaldo)"
+        )
         lineas.append(
             f"## Contracciones uterinas\n{contr['num']} detectada(s) "
-            f"({contr.get('por_10min')} por 10 minutos) — "
-            + ("**tachisistolia** (criterio ámbar NICE NG229)." if contr.get("tachisistolia") else "frecuencia dentro de rango normal.")
+            f"(tasa global: {contr.get('por_10min')} por 10 minutos{txt_30m}) — "
+            + ("**tachisistolia presente** (criterio ámbar NICE NG229 / ACOG)." if contr.get("tachisistolia") else "frecuencia dentro de rango normal.")
         )
     else:
         lineas.append("## Contracciones uterinas\nSin datos de UA para evaluar frecuencia.")
     lineas.append("")
     lineas.append(
-        f"## Clasificación FIGO 2015 (ya calculada determinísticamente)\n"
-        f"**Categoría {figo['categoria']} — {figo['descripcion']}**\n"
+        f"## Clasificación FIGO 2015 / NICE NG229 y Comparativo ACOG CPG No. 10\n"
+        f"**Categoría MEFI (FIGO/NICE): Categoría {figo['categoria']} — {figo['descripcion']}**\n"
         f"Razones: {'; '.join(figo['razones'])}\n"
         f"Semáforo NICE: línea base={figo['semaforo_nice']['linea_base']}, "
         f"variabilidad={figo['semaforo_nice']['variabilidad']}, "
         f"desaceleraciones={figo['semaforo_nice']['desaceleraciones']}, "
-        f"contracciones={figo['semaforo_nice'].get('contracciones', 'verde')}."
+        f"contracciones={figo['semaforo_nice'].get('contracciones', 'verde')}.\n"
+        f"Estratificación Box 3 ACOG (Categoría II): nivel **{riesgo_cat2['nivel']}** ({'; '.join(riesgo_cat2['razones'])}).\n"
+        f"Comparativo ACOG CPG No. 10 estricta: {acog_estricta['nota_comparativa']}\n"
+        f"Tipificación determinística de hipoxia (Protocolo V2): {hipoxia_tip['resumen']}"
     )
 
     return "\n".join(lineas)
@@ -153,7 +196,8 @@ def construir_prompt_usuario(features: dict, metadatos: dict | None = None) -> s
 def generar_informe_plantilla(features: dict, metadatos: dict | None = None) -> str:
     """Genera un informe clínico estructurado 100% determinístico a partir de
     `features` (calculado por `clinical.extraer_features()`) y los protocolos
-    FIGO 2015 / NICE NG229, sin requerir conexión a ningún LLM.
+    FIGO 2015 / NICE NG229 / ACOG CPG No. 10 (2025) / Protocolo Institucional V2
+    (sept. 2025), sin requerir conexión a ningún LLM.
     """
     basal = features["linea_base"]
     variabilidad = features["variabilidad"]
@@ -164,6 +208,11 @@ def generar_informe_plantilla(features: dict, metadatos: dict | None = None) -> 
     area_total = features.get("area_desaceleraciones_lpm_s")
     figo = features["figo"]
     semaforo = figo["semaforo_nice"]
+    riesgo_cat2 = features.get("riesgo_categoria_ii") or clinical.evaluar_riesgo_categoria_ii(features)
+    sospecha_mat = features.get("sospecha_fcf_materna") or clinical.detectar_sospecha_fcf_materna(features)
+    acog_estricta = features.get("acog_estricta") or clinical.clasificar_acog_estricta(features)
+    criterios_60 = features.get("criterios_60") or clinical.evaluar_criterios_60(desaceleraciones)
+    hipoxia_tip = features.get("hipoxia_tipificada") or clinical.tipificar_hipoxia(features)
 
     icono_color = {"verde": "🟢 Normal (Blanco/Verde)", "amarillo": "🟡 Sospechoso (Ámbar)", "rojo": "🔴 Patológico (Rojo)"}
 
@@ -178,9 +227,11 @@ def generar_informe_plantilla(features: dict, metadatos: dict | None = None) -> 
     # --- Evaluación aceleraciones ---
     if aceleraciones:
         amp_max_acel = max(a["amplitud_max_lpm"] for a in aceleraciones)
+        n_acel_prol = sum(1 for a in aceleraciones if a.get("prolongada"))
+        txt_acel_prol = f", incluyendo {n_acel_prol} aceleración(es) prolongada(s) (2–10 min)" if n_acel_prol else ""
         resumen_acel = (
             f"{len(aceleraciones)} detectada(s) (reactividad presente, "
-            f"amplitud máx. +{amp_max_acel:.0f} lpm sobre la basal)."
+            f"amplitud máx. +{amp_max_acel:.0f} lpm sobre la basal{txt_acel_prol})."
         )
     else:
         resumen_acel = "No se detectaron aceleraciones en el segmento analizado."
@@ -205,9 +256,9 @@ def generar_informe_plantilla(features: dict, metadatos: dict | None = None) -> 
         )
         partes_prol = []
         if n_prolongadas:
-            partes_prol.append(f"{n_prolongadas} prolongada(s) (≥3 min)")
+            partes_prol.append(f"{n_prolongadas} prolongada(s) (≥{clinical.DESACEL_PROLONGADA_MIN_S // 60} min)")
         if n_muy_prolongadas:
-            partes_prol.append(f"{n_muy_prolongadas} muy prolongada(s) (≥5 min)")
+            partes_prol.append(f"{n_muy_prolongadas} muy prolongada(s) (≥{clinical.DESACEL_MUY_PROLONGADA_S // 60} min)")
         texto_prol = f" [{'; '.join(partes_prol)}]" if partes_prol else ""
         texto_area = (
             f" — área acumulada bajo desaceleraciones: **{area_total:,} lpm·s**".replace(",", ".")
@@ -221,11 +272,17 @@ def generar_informe_plantilla(features: dict, metadatos: dict | None = None) -> 
     # --- Evaluación contracciones ---
     if contr.get("num") is not None:
         por_10 = contr.get("por_10min")
-        tasa_str = f" ({por_10} cada 10 min)" if por_10 is not None else ""
+        por_30m = contr.get("por_10min_ventana_30m")
+        acog_30m = contr.get("tachisistolia_acog_30m", False)
+        tasa_str = f" (tasa global: {por_10} cada 10 min" if por_10 is not None else " ("
+        if por_30m is not None:
+            tasa_str += f"; promedio móvil 30 min: {por_30m} cada 10 min [{'ACOG >5: positivo' if acog_30m else 'ACOG >5: negativo'}])"
+        else:
+            tasa_str += "; registro <30 min, aplica respaldo de tasa global)"
         estado_ua = (
-            "**taquisistolia presente** (≥5 en 10 min, criterio ámbar NICE NG229)"
+            "**taquisistolia presente** (criterio ámbar NICE NG229 ≥5/10 min y/o ACOG >5/10 min en 30 min)"
             if contr.get("tachisistolia")
-            else "frecuencia normal (<5 en 10 min)"
+            else "frecuencia normal (<5 en 10 min global y en ventana de 30 min)"
         )
         resumen_ua = f"{contr['num']} contracción(es) detectada(s){tasa_str} — {estado_ua}."
     else:
@@ -233,9 +290,12 @@ def generar_informe_plantilla(features: dict, metadatos: dict | None = None) -> 
 
     # --- Evaluación patrón sinusoidal ---
     if sinusoidal.get("presente"):
+        dur_sin_min = sinusoidal.get("duracion_evaluada_min")
+        dur_txt = f", duración efectiva {dur_sin_min} min" if dur_sin_min is not None else ""
         resumen_sin = (
             f"**Presente** ({sinusoidal.get('frecuencia_dominante_cpm')} ciclos/min, "
-            f"amplitud {sinusoidal.get('amplitud_lpm')} lpm)."
+            f"amplitud {sinusoidal.get('amplitud_lpm')} lpm{dur_txt}; "
+            f"nota normativa: ACOG exige ≥20 min y Protocolo V2 exige >30 min con ausencia de aceleraciones)."
         )
     else:
         resumen_sin = f"No detectado ({sinusoidal.get('motivo', 'sin hallazgos')})."
@@ -279,8 +339,9 @@ def generar_informe_plantilla(features: dict, metadatos: dict | None = None) -> 
             )
         if n_prolongadas or n_muy_prolongadas:
             puntos_fisio.append(
-                "- **Desaceleración prolongada (≥3 min):** alerta de reducción aguda del flujo uteroplacentario "
-                "o funicular (descartar hipotensión materna, hipertonía uterina, prolapso de cordón o descenso rápido)."
+                f"- **Desaceleración prolongada (≥{clinical.DESACEL_PROLONGADA_MIN_S // 60} min, ACOG Tabla 1 / Protocolo V2):** "
+                "alerta de reducción aguda del flujo uteroplacentario o funicular (descartar hipotensión materna, "
+                "hipertonía uterina, prolapso de cordón o descenso rápido)."
             )
     else:
         puntos_fisio.append(
@@ -300,31 +361,41 @@ def generar_informe_plantilla(features: dict, metadatos: dict | None = None) -> 
             "severa, hipoxia fetal grave o administración materna de opioides/analgésicos."
         )
 
-    # --- Conducta sugerida según categoría FIGO / NICE ---
+    # --- Conducta sugerida según categoría FIGO / NICE / Protocolo V2 / ACOG CPG No. 10 (Fase A1) ---
     cat_figo = figo["categoria"]
     if cat_figo == "I":
         conducta = [
             "- **Trazado Categoría I (Normal):** alta probabilidad de bienestar fetal y equilibrio ácido-base conservado (VPN >96%).",
-            "- Mantener vigilancia obstétrica habitual según etapa del trabajo de parto y protocolo institucional.",
+            "- **Conducta sugerida:** mantener vigilancia obstétrica habitual según etapa del trabajo de parto y Protocolo de Vigilancia del Bienestar Fetal Intraparto V2.",
             "- No requiere intervenciones correctivas específicas sobre el monitoreo actual.",
         ]
     elif cat_figo == "II":
         conducta = [
-            "- **Trazado Categoría II (Sospechoso / Indeterminado):** requiere evaluación clínica del contexto materno-fetal completo.",
-            "- **Medidas correctivas iniciales (reanimación intrauterina conservadora):**",
-            "  1. lateralización materna (decúbito lateral izquierdo) para optimizar retorno venoso;",
-            "  2. evaluar signos vitales maternos y corregir hipotensión o deshidratación (aporte hídrico EV);",
-            "  3. si existe taquisistolia o desaceleraciones repetitivas bajo uso de oxitocina, **reducir o suspender infusión de uterotónicos**.",
-            "- Mantener monitoreo continuo y **reevaluar respuesta en 20–30 minutos**; si el trazado no mejora o progresa a Categoría III, solicitar evaluación médica obstétrica para definir conducta.",
+            "- **Trazado Categoría II (Sospechoso / Indeterminado):** **conducta sugerida — aviso inmediato al médico/a ginecobstetra residente de turno** (responsabilidad de la matrón/a según Protocolo V2, sept. 2025) y evaluación integral del contexto materno-fetal.",
+            f"- **Estratificación de riesgo Box 3 ACOG CPG No. 10:** nivel **{riesgo_cat2['nivel'].upper()}** ({'; '.join(riesgo_cat2['razones'])}).",
+            "- **Maniobras sugeridas de reanimación intrauterina (Protocolo V2 / ACOG CPG No. 10):**",
+            "  1. **Lateralización materna** (decúbito lateral izquierdo o derecho) para optimizar el retorno venoso y la perfusión uteroplacentaria;",
+            "  2. **Corrección de hipotensión materna e hidratación EV** (bolo de cristaloides y control de signos vitales);",
+            "  3. **Reducción o suspensión de agentes de inducción/aceleración (oxitocina)**, especialmente ante desaceleraciones recurrentes o dinámica acelerada;",
+            "  4. **Amnioinfusión:** considerar como opción terapéutica ante **desaceleraciones variables recurrentes** por sospecha de compresión funicular (ACOG CPG No. 10 / Protocolo V2);",
+            "  5. **Corrección de fisiopatología materna:** si existe taquicardia fetal, evaluar y tratar causas maternas subyacentes (fiebre/corioamnionitis, deshidratación, dolor o fármacos);",
+            "  6. **Oxígeno suplementario SOLO si existe hipoxia materna documentada (SatO2 < 94 %):** ACOG CPG No. 10 recomienda en contra de la hiperoxigenación materna rutinaria con saturación materna normal;",
+            "  7. **Tocolisis de acción rápida:** si existe taquisistolía asociada a Categoría II con rasgos de alto riesgo que persiste pese a pausar la oxitocina, sugerir agente uterorrelajante de acción rápida (institucional Protocolo V2: **nitroglicerina / fenoterol**; ACOG CPG No. 10 cita **terbutalina**).",
+            "- **Ventana de observación y reevaluación:** si el patrón Categoría II persiste pese a las maniobras de reanimación intrauterina, mantener observación estrecha de **½ a 1 hora (30 a 60 minutos)** según Protocolo V2, matizada por los rasgos del **Box 3 ACOG** (ACOG individualiza el tiempo de observación según la presencia de rasgos de alto riesgo vs. rasgos protectores y la evolución clínica).",
         ]
     else:
         conducta = [
-            "- **Trazado Categoría III (Patológico):** **alerta de riesgo elevado de hipoxia/acidemia fetal.** Requiere evaluación médica obstétrica inmediata.",
-            "- **Medidas de reanimación intrauterina urgentes:**",
-            "  1. posición materna en decúbito lateral y corrección inmediata de hipotensión;",
-            "  2. **suspensión inmediata de oxitocina** u otros uterotónicos (considerar tocolisis aguda si hay hipertonía/taquisistolia);",
-            "  3. realizar examen obstétrico para descartar causas agudas (prolapso de cordón, desprendimiento placentario, descenso rápido).",
-            "- Si el patrón patológico no revierte rápidamente tras las medidas iniciales, **preparar para interrupción expedita del embarazo** (parto instrumental o cesárea de urgencia según condiciones obstétricas).",
+            "- **Trazado Categoría III (Patológico):** **alerta de riesgo elevado de hipoxia/acidemia fetal.** **Conducta sugerida: aviso inmediato al médico/a ginecobstetra residente de turno y reanimación intrauterina urgente.**",
+            "- **Maniobras urgentes de reanimación intrauterina (Protocolo V2 / ACOG CPG No. 10):**",
+            "  1. Lateralización materna inmediata, hidratación EV y corrección de hipotensión materna;",
+            "  2. **Suspensión inmediata de oxitocina** u otros uterotónicos;",
+            "  3. **Oxígeno suplementario solo ante hipoxia materna (SatO2 < 94 %)** (según ACOG CPG No. 10);",
+            "  4. Evaluación obstétrica inmediata para descartar eventos centinela (prolapso de cordón, desprendimiento prematuro de placenta normoinserta, rotura uterina o descenso rápido).",
+            "- **Conducta sugerida por subtipo etiológico (ACOG CPG No. 10 / Protocolo V2):**",
+            "  - *Bradicardia con sospecha de rotura uterina, desprendimiento o prolapso funicular:* proceder al **parto lo antes posible**;",
+            "  - *Contracción tetánica o taquisistolía asociada a Categoría III:* suspender uterotónicos y considerar **tocolisis de acción rápida** (institucional: **nitroglicerina / fenoterol**; ACOG cita **terbutalina**) **antes** del parto;",
+            "  - *Patrón sinusoidal persistente (> 30 min según Protocolo V2):* sin beneficio de manejo expectante intraparto, preparar **parto expedito**.",
+            "- **Plazo máximo de observación:** si el trazado Categoría III no revierte con las maniobras iniciales en un máximo de **10 minutos** (Protocolo V2), proceder a la **interrupción expedita del embarazo** (parto instrumental o cesárea de urgencia según condiciones obstétricas).",
         ]
 
     # --- Armado del documento ---
@@ -342,6 +413,14 @@ def generar_informe_plantilla(features: dict, metadatos: dict | None = None) -> 
             extra_ctx.append(f"**Contexto:** `{metadatos['contexto_clinico']}`")
         if metadatos.get("uso_oxitocina") and metadatos["uso_oxitocina"] != "No especificado":
             extra_ctx.append(f"**Oxitocina:** `{metadatos['uso_oxitocina']}`")
+        if metadatos.get("meconio") and metadatos["meconio"] != "No especificado":
+            extra_ctx.append(f"**Meconio:** `{metadatos['meconio']}`")
+        if metadatos.get("patologia_antenatal"):
+            extra_ctx.append(f"**Patología antenatal:** `{metadatos['patologia_antenatal']}`")
+        if metadatos.get("comparacion_mefi_previos"):
+            extra_ctx.append(f"**Comparación MEFI previos:** `{metadatos['comparacion_mefi_previos']}`")
+        else:
+            extra_ctx.append("**Comparación MEFI previos:** *Pendiente revisar trazados anteriores del caso (Protocolo V2)*")
         sufijo_ctx = (" · " + " · ".join(extra_ctx)) if extra_ctx else ""
         lineas.append(
             f"**Registro:** `{id_reg}` · **Fecha/hora inicio:** `{fecha_reg}` · **Velocidad papel:** `{vel_reg} cm/min`{sufijo_ctx}"
@@ -351,15 +430,24 @@ def generar_informe_plantilla(features: dict, metadatos: dict | None = None) -> 
     lineas.extend([
         "#### 1. Parámetros Cardiotocográficos Extraídos",
         f"- **Línea base FCF:** **{basal:.0f} lpm** — {estado_basal}.",
-        f"- **Variabilidad:** **{variabilidad['amplitud_media_lpm']} lpm** (categoría **{variabilidad['categoria']}**, evaluada en {variabilidad['ventanas_evaluadas']} ventanas de 1 min).",
+        f"- **Variabilidad:** **{variabilidad['amplitud_media_lpm']} lpm** (categoría FIGO/NICE: **{variabilidad['categoria']}** · NICHD/ACOG: **{variabilidad.get('categoria_nichd', variabilidad['categoria'])}**, evaluada en {variabilidad['ventanas_evaluadas']} ventanas de 1 min).",
         f"- **Aceleraciones:** {resumen_acel}",
         f"- **Desaceleraciones:** {resumen_decel}",
         f"- **Actividad uterina (UA):** {resumen_ua}",
         f"- **Patrón sinusoidal:** {resumen_sin}",
+    ])
+    if sospecha_mat.get("sospecha"):
+        lineas.append(f"- {sospecha_mat['mensaje']}")
+    if criterios_60.get("num_eventos_dos_o_mas_criterios", 0) > 0:
+        lineas.append(f"- **Criterios «60» en desaceleraciones variables (Protocolo V2):** {criterios_60['resumen']}")
+
+    lineas.extend([
         "",
         "#### 2. Clasificación Normativa (FIGO 2015 / NICE NG229)",
         f"- **Categoría FIGO 2015:** **Categoría {cat_figo} — {figo['descripcion']}**",
         f"- **Criterios determinantes:** {'; '.join(figo['razones'])}",
+        f"- **Subclasificador de riesgo Box 3 ACOG (Categoría II):** Nivel **{riesgo_cat2['nivel'].upper()}** ({'; '.join(riesgo_cat2['razones'])}).",
+        f"- **Comparativo ACOG CPG No. 10 estricta vs. MEFI:** {acog_estricta['nota_comparativa']}",
         "- **Semáforo por variable (NICE NG229):**",
         f"  - Línea base: {icono_color[semaforo['linea_base']]}",
         f"  - Variabilidad: {icono_color[semaforo['variabilidad']]}",
@@ -367,15 +455,18 @@ def generar_informe_plantilla(features: dict, metadatos: dict | None = None) -> 
         f"  - Contracciones: {icono_color[semaforo.get('contracciones', 'verde')]}",
         "",
         "#### 3. Correlación Fisiopatológica (Según Patrón Observado)",
+        f"- {hipoxia_tip['resumen']}",
         *puntos_fisio,
         "",
         "#### 4. Conducta Sugerida según Protocolo",
         *conducta,
         "",
         "---",
-        "*Nota: Informe generado automáticamente mediante plantilla determinística (reglas FIGO 2015 / NICE NG229). "
-        "Esta herramienta es de apoyo a la decisión clínica, no reemplaza el juicio profesional y requiere validación humana "
-        "(ref. ensayo INFANT, Lancet 2017).*",
+        "*Nota reguladora: Informe de conducta sugerida generado mediante plantilla determinística "
+        "(Protocolo Institucional V2 sept. 2025 / ACOG CPG No. 10 2025 / FIGO 2015 / NICE NG229). "
+        "ACOG CPG No. 10 recomienda en contra de depender primariamente de sistemas computarizados para "
+        "interpretar y manejar la FCF (recomendación fuerte, evidencia de calidad moderada; ref. ensayo "
+        "INFANT, Lancet 2017). Esta herramienta es de apoyo a la decisión clínica y requiere validación humana obligatoria.*",
     ])
 
     return "\n".join(lineas)

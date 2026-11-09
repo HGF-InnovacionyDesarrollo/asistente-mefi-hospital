@@ -208,6 +208,23 @@ intacta. El criterio FIGO real (>50% de contracciones) fue re-evaluado con el
 detector nuevo: 67.5%/64.3% — **no adoptado** (viola la regla de no bajar
 sensibilidad).
 
-**Última actualización**: 2026-10-13  
-**Estado**: ✓ Validación ampliada con métricas de la literatura (AUC/PPV/NPV)  
+**Última actualización**: 2026-11-09  
+**Estado**: ✓ Validación ampliada con métricas de la literatura (AUC/PPV/NPV) y verificación paso a paso de Fase B (MEFI v2.0)  
 **Siguiente**: Score continuo de riesgo como propuesta futura; validación en población local antes de cualquier uso clínico
+
+---
+
+## Addendum v2.0: Validación paso a paso de Fase B (NICHD / ACOG CPG No. 10 / Protocolo V2) — 09-nov-2026
+
+Criterio duro de no inferioridad (regla no negociable): **Sensibilidad ≥ 95,0 %** y **VPN (NPV) ≥ 96,6 %** sobre los 552 registros de CTU-UHB (`scripts/pipeline/validar_ctu_uhb.py --all`). Cada cambio de Fase B fue ejecutado y validado de manera individual:
+
+| Paso / Cambio de Umbral | Valor Anterior | Valor Nuevo (v2.0) | Sensibilidad | Especificidad | PPV | NPV (VPN) | Exactitud Balanceada | AUROC `area_decels` | Estado |
+|---|---|---|---|---|---|---|---|---|---|
+| **Línea base (pre-Fase B)** | — | — | **95,0 %** (VP 38, FN 2) | **11,1 %** (VN 57, FP 455) | **7,7 %** | **96,6 %** | **53,1 %** | **0,710** | Referencia |
+| **B1.** `DESACEL_PROLONGADA_MIN_S` | `180 s` (3 min) | `120 s` (2 min, ACOG Tabla 1 / Protocolo V2; se conserva `DESACEL_MUY_PROLONGADA_S = 300 s`) | **95,0 %** (38/40) | **11,1 %** (57/512) | **7,7 %** | **96,6 %** | **53,1 %** | **0,710** | ✅ Adoptado |
+| **B2.** `SINUSOIDAL_DURACION_MIN_S` | `600 s` (10 min) | `1200 s` (20 min, ACOG Tabla 1 + nota >30 min Protocolo V2) | **95,0 %** (38/40) | **11,1 %** (57/512) | **7,7 %** | **96,6 %** | **53,1 %** | **0,710** | ✅ Adoptado |
+| **B3.** Aceleraciones por EG (`<32 sem`: 10 lpm × 10 s) y `aceleración prolongada` (2–10 min) | 15 lpm × 15 s fijo | Parametrizado por EG (`10×10` si `<32 sem`; `15×15` por defecto) | **95,0 %** (38/40) | **11,1 %** (57/512) | **7,7 %** | **96,6 %** | **53,1 %** | **0,710** | ✅ Adoptado (CTU-UHB es a término: efecto nulo verificado) |
+| **B4.** Taquisistolía en ventana móvil de 30 min (`>5/10 min` en 30 min ACOG + respaldo global `≥5/10 min`) | Tasa global `≥5/10 min` | Ventana móvil 30 min ACOG (`>5/10 min`) + tasa global NICE (`≥5/10 min`) | **95,0 %** (38/40) | **10,9 %** (56/512) | **7,7 %** | **96,6 %** | **53,0 %** | **0,710** | ✅ Adoptado (cumple sensibilidad ≥95,0 % y VPN ≥96,6 %) |
+| **B5.** Variabilidad en 4 categorías NICHD (`ausente <1`, `minima ≤5`, `moderada 6–25`, `marcada >25`) | 3 categorías (`reducida`, `normal`, `aumentada`) | 4 categorías `categoria_nichd` + alias retrocompatible `categoria` | **95,0 %** (38/40) | **10,9 %** (56/512) | **7,7 %** | **96,6 %** | **53,0 %** | **0,710** | ✅ Adoptado |
+| **B6.** Variabilidad intra-desaceleración (en desaceleraciones `≥2 min`: alerta si amplitud intra-evento `<5 lpm`) | No medida | `variabilidad_intra_lpm` y `variabilidad_reducida_intra_evento` | **95,0 %** (38/40) | **10,9 %** (56/512) | **7,7 %** | **96,6 %** | **53,0 %** | **0,710** | ✅ Adoptado |
+
