@@ -10,3 +10,5 @@ data/extracted/
 data/prueba_llm_local/
 .tmp.drive*/
 dist/
+*_reporte_consolidado.pdf
+docs/img_manual/
