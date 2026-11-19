@@ -160,8 +160,6 @@ except Exception as e:
     st.sidebar.error(f"Error al inicializar cliente: {e}")
     client = None
 
-from processing import FCF_MAX_NORMAL, FCF_MIN_NORMAL, procesar_mefi
-
 DPI_RENDER_PDF = 300
 
 # --- FUNCIONES DE CONVERSIÓN Y ANÁLISIS ---
