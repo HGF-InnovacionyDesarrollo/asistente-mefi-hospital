@@ -18,7 +18,6 @@
   - `extracted/comparaciones/` — extracciones A/B del mismo caso con distinta fuente (ej. `2026-06-24_caso01_07h27min47s_jpg.csv` = extracción desde JPG vs. la versión canónica desde PDF).
   - `extracted/patrones_referencia/` — casos clínicos de patrón particular conservados como referencia (sinusal, PTVE).
 - `ctu_uhb/` — registros `.hea`/`.dat` descargados de PhysioNet (gitignored, se regeneran con `scripts/pipeline/descargar_ctu_uhb.py`).
-- `sample.csv` — muestra sintética de referencia, se mantiene en la raíz.
 
 Los escaneos originales del hospital NO viven aquí: están en `../casos_hospital/`
 (gitignored, nombres anonimizados) y su mapeo nombre-real↔casoNN fuera del
